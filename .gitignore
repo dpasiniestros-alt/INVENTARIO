@@ -1,0 +1,20 @@
+﻿# Secrets & Credentials
+.streamlit/secrets.toml
+service_account.json
+*.key
+*.pem
+
+# Data & Temp files
+data/*.json
+data/*.sqlite
+temp_remitos/*
+__pycache__/
+*/__pycache__/
+*.pyc
+
+# Environment
+.venv/
+env/
+venv/
+.DS_Store
+Thumbs.db
