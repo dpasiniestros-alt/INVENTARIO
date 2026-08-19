@@ -39,8 +39,13 @@ class DatabaseManager:
         try:
             sheet = self.spreadsheet_inventario.worksheet(title)
         except Exception:
-            sheet = self.spreadsheet_inventario.add_worksheet(title=title, rows=1000, cols=max(20, len(headers)))
-            sheet.append_row(headers)
+            # Otro rerun puede haber creado la hoja entre ambas llamadas.
+            # Reintentar la busqueda evita fallos por condiciones de carrera.
+            try:
+                sheet = self.spreadsheet_inventario.add_worksheet(title=title, rows=1000, cols=max(20, len(headers)))
+                sheet.append_row(headers)
+            except Exception:
+                sheet = self.spreadsheet_inventario.worksheet(title)
         if not sheet.row_values(1):
             sheet.append_row(headers)
         return sheet
@@ -590,7 +595,11 @@ class DatabaseManager:
             self._save_sheet_dataframe("RESPONSABLES", ["nombre", "pin"], df)
 
     def get_receptores(self) -> pd.DataFrame:
-        return self._sheet_dataframe("RECEPTORES", ["nombre", "email", "gerencia"])
+        try:
+            return self._sheet_dataframe("RECEPTORES", ["nombre", "email", "gerencia"])
+        except Exception as exc:
+            print(f"No se pudo abrir la hoja RECEPTORES: {exc}")
+            return pd.DataFrame(columns=["nombre", "email", "gerencia"])
 
     def save_receptores(self, df: pd.DataFrame):
         self._save_sheet_dataframe("RECEPTORES", ["nombre", "email", "gerencia"], df)
