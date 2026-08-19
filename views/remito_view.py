@@ -426,6 +426,7 @@ def render_remito_view():
 
     # 6. CAMPOS ESPECÍFICOS PARA ENTRADA
     numero_factura = ""
+    foto_factura = None
     foto_factura_url = ""
     
     if es_entrada:
@@ -532,11 +533,43 @@ def render_remito_view():
                 remito_header["Link_PDF"] = pdf_path
                 db.guardar_remito(remito_header, items_to_save)
                 
+                # Subir foto de factura a Google Drive (si existe)
+                foto_factura_url_final = ""
+                if es_entrada and foto_factura_url and foto_factura_url.startswith("Pendiente"):
+                    try:
+                        with st.spinner("Subiendo foto de factura a Google Drive..."):
+                            # Leer archivo
+                            archivo_bytes = foto_factura.read()
+                            # Crear nombre único
+                            timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                            nombre_archivo = f"Factura_{numero_factura}_{timestamp}_{foto_factura.name}"
+                            # Subir a Drive
+                            foto_factura_url_final = db.subir_archivo_a_drive(archivo_bytes, nombre_archivo)
+                            if foto_factura_url_final:
+                                st.success("✅ Foto de factura subida a Google Drive")
+                    except Exception as e:
+                        st.warning(f"⚠️ No se pudo subir la foto: {str(e)}")
+                        foto_factura_url_final = ""
+                
+                # Registrar patentes no catalogadas
+                if patente_final and patente_final != "-":
+                    vehiculos_df = db.get_vehiculos()
+                    patentes_catalogadas = vehiculos_df["PATENTE"].str.upper().tolist() if not vehiculos_df.empty else []
+                    
+                    if patente_final.upper() not in patentes_catalogadas:
+                        db.registrar_patente_no_catalogada(
+                            patente_final,
+                            gerencia=gerencia_final,
+                            receptor=receptor_nombre if es_salida else responsable_final,
+                            remito_id=nro_remito
+                        )
+                        st.info(f"⚠️ Patente {patente_final} no catalogada. Se agregó a la lista de PATENTES_NO_CATALOGADAS para revisión.")
+                
                 # Guardar también en BASE_DATOS_REMITOS
                 db.guardar_remito_en_gsheet(
                     remito_header,
-                    numero_factura=numero_factura,
-                    foto_factura_url=foto_factura_url
+                    numero_factura=numero_factura if es_entrada else "",
+                    foto_factura_url=foto_factura_url_final if es_entrada else ""
                 )
 
                 email_status_msg = ""

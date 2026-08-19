@@ -809,6 +809,107 @@ class DatabaseManager:
         except Exception:
             return []
 
+    def registrar_patente_no_catalogada(self, patente: str, gerencia: str = "", receptor: str = "", remito_id: str = "") -> bool:
+        """
+        Registra una patente usada que NO está en el GSHEET de VEHICULOS.
+        
+        Parámetros:
+        - patente: Patente del vehículo
+        - gerencia: Gerencia asociada
+        - receptor: Persona que recibió
+        - remito_id: ID del remito donde se usó
+        
+        Retorna: True si fue exitoso
+        """
+        if not self.spreadsheet_inventario or not patente:
+            return False
+        
+        try:
+            # Crear hoja si no existe
+            try:
+                sheet = self.spreadsheet_inventario.worksheet('PATENTES_NO_CATALOGADAS')
+            except:
+                sheet = self.spreadsheet_inventario.add_worksheet(title='PATENTES_NO_CATALOGADAS', rows=500, cols=10)
+                # Agregar encabezados
+                headers = ['PATENTE', 'GERENCIA', 'RECEPTOR', 'REMITO_ID', 'FECHA_USO', 'ESTADO', 'OBSERVACIONES']
+                sheet.append_row(headers)
+            
+            # Verificar si ya existe
+            all_data = sheet.get_all_records()
+            for row in all_data:
+                if row.get('PATENTE', '').upper() == patente.upper():
+                    # Ya existe, actualizar
+                    return True
+            
+            # Agregar nueva patente
+            row = [
+                patente.upper(),
+                gerencia,
+                receptor,
+                remito_id,
+                datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+                'Pendiente de catalogar',
+                'Usada en remito, esperando ser agregada a VEHICULOS'
+            ]
+            sheet.append_row(row)
+            return True
+        
+        except Exception as e:
+            print(f"Error registrando patente no catalogada: {e}")
+            return False
+
+    def subir_archivo_a_drive(self, archivo_bytes, nombre_archivo: str, carpeta_id: str = None) -> str:
+        """
+        Sube un archivo a Google Drive.
+        
+        Parámetros:
+        - archivo_bytes: Contenido del archivo en bytes
+        - nombre_archivo: Nombre del archivo
+        - carpeta_id: ID de la carpeta en Drive (opcional)
+        
+        Retorna: URL de acceso al archivo o string vacío si falla
+        """
+        if not self.is_connected_gsheets:
+            return ""
+        
+        try:
+            from googleapiclient.discovery import build
+            from googleapiclient.http import MediaIoBaseUpload
+            from io import BytesIO
+            from google.oauth2.service_account import Credentials
+            
+            # Usar las mismas credenciales que para gsheets
+            import os
+            import streamlit as st
+            
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            
+            if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
+                creds_dict = dict(st.secrets["gcp_service_account"])
+                creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+                drive_service = build('drive', 'v3', credentials=creds)
+                
+                # Preparar archivo
+                file_metadata = {'name': nombre_archivo}
+                if carpeta_id:
+                    file_metadata['parents'] = [carpeta_id]
+                
+                # Subir archivo
+                media = MediaIoBaseUpload(BytesIO(archivo_bytes), mimetype='application/octet-stream', resumable=True)
+                file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+                
+                # Retornar enlace
+                return file.get('webViewLink', '')
+            else:
+                return ""
+        
+        except Exception as e:
+            print(f"Error subiendo archivo a Drive: {e}")
+            return ""
+
 
 def get_db():
     return DatabaseManager()
