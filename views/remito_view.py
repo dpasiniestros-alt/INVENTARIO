@@ -424,6 +424,31 @@ def render_remito_view():
     else:
         st.info("El remito no tiene artículos cargados aún.")
 
+    # 6. CAMPOS ESPECÍFICOS PARA ENTRADA
+    numero_factura = ""
+    foto_factura_url = ""
+    
+    if es_entrada:
+        st.markdown("#### 🧾 Información de Factura (solo para ENTRADA)")
+        col_fact1, col_fact2 = st.columns(2)
+        
+        with col_fact1:
+            numero_factura = st.text_input(
+                "Número de Factura (opcional):",
+                placeholder="Ej: FC-2026-001234",
+                help="Número de factura asociado a la compra/ingreso de materiales"
+            )
+        
+        with col_fact2:
+            foto_factura = st.file_uploader(
+                "Foto de la Factura (opcional):",
+                type=["jpg", "jpeg", "png", "pdf"],
+                help="Sube la foto o PDF de la factura para referencia"
+            )
+            if foto_factura:
+                st.caption(f"✅ Archivo: {foto_factura.name}")
+                foto_factura_url = f"Pendiente de carga: {foto_factura.name}"
+    
     # 6. OBSERVACIONES Y FIRMA DIGITAL
     st.markdown("#### ✍️ Conformidad y Firma")
     observaciones = st.text_area("Observaciones adicionales (opcional):", placeholder="Detalles adicionales sobre el movimiento...")
@@ -506,6 +531,13 @@ def render_remito_view():
                 pdf_path = generate_remito_pdf(remito_header, items_to_save, signature_img)
                 remito_header["Link_PDF"] = pdf_path
                 db.guardar_remito(remito_header, items_to_save)
+                
+                # Guardar también en BASE_DATOS_REMITOS
+                db.guardar_remito_en_gsheet(
+                    remito_header,
+                    numero_factura=numero_factura,
+                    foto_factura_url=foto_factura_url
+                )
 
                 email_status_msg = ""
                 if es_salida and receptor_email and "@" in receptor_email:
