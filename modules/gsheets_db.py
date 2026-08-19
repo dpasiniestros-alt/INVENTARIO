@@ -433,6 +433,19 @@ class DatabaseManager:
         if cols_map:
             df.rename(columns=cols_map, inplace=True)
 
+        # La hoja VEHICULOS tiene varias columnas repetidas (STATUS, GERENCIA,
+        # etc.). Consolidarlas evita que pandas devuelva un DataFrame al pedir
+        # una columna y permite usar siempre el primer dato no vacio.
+        if df.columns.duplicated().any():
+            consolidated = {}
+            for column in dict.fromkeys(df.columns):
+                same_columns = df.loc[:, df.columns == column]
+                if same_columns.shape[1] == 1:
+                    consolidated[column] = same_columns.iloc[:, 0]
+                else:
+                    consolidated[column] = same_columns.replace("", pd.NA).bfill(axis=1).iloc[:, 0].fillna("")
+            df = pd.DataFrame(consolidated, index=df.index)
+
         for req in ["PATENTE", "AÑO", "MARCA", "MODELO", "GERENCIA", "STATUS", "FECHA DE BAJA"]:
             if req not in df.columns:
                 df[req] = ""
