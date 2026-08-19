@@ -304,6 +304,17 @@ def render_remito_view():
                     if cat_sel in ["BATERIA", "NEUMATICO"] and not seriales_str:
                         st.error(f"Debe especificar los números marcados de {cat_sel}.")
                     else:
+                        nuevos_seriales = [s.strip().upper() for s in str(seriales_str).split(",") if s.strip() and s.strip() != "-"]
+                        usados = []
+                        for cart_item in st.session_state["cart_items"]:
+                            if cart_item.get("Categoria") == cat_sel:
+                                usados.extend(str(cart_item.get("Nro_Serie_Bateria_Neumatico", "")).upper().split(","))
+                        usados = [s.strip() for s in usados if s.strip() and s.strip() != "-"]
+                        repetidos = sorted(set(nuevos_seriales).intersection(usados))
+                        if len(nuevos_seriales) != len(set(nuevos_seriales)) or repetidos:
+                            detalle = ", ".join(sorted(set(repetidos)))
+                            st.error(f"No puede agregar dos veces la misma unidad marcada{': ' + detalle if detalle else ''}.")
+                            st.stop()
                         st.session_state["cart_items"].append({
                             "ID_Producto": p_selected["ID"],
                             "Categoria": p_selected["Categoria"],
@@ -449,6 +460,14 @@ def render_remito_view():
             if foto_factura:
                 st.caption(f"✅ Archivo: {foto_factura.name}")
                 foto_factura_url = f"Pendiente de carga: {foto_factura.name}"
+
+    st.markdown("#### 📷 Fotos de evidencia (opcional)")
+    fotos_evidencia = st.file_uploader(
+        "Fotos del vehículo o de la mercadería instalada:",
+        type=["jpg", "jpeg", "png"],
+        accept_multiple_files=True,
+        help="Estas fotos se incorporan al PDF del remito y se guardan en Google Drive."
+    )
     
     # 6. OBSERVACIONES Y FIRMA DIGITAL
     st.markdown("#### ✍️ Conformidad y Firma")
@@ -521,6 +540,7 @@ def render_remito_view():
                 "Observaciones": observaciones,
                 "Enviado_Email": "NO"
             }
+            remito_header["Numero_Factura"] = numero_factura if es_entrada else ""
 
             items_to_save = []
             for it in st.session_state["cart_items"]:
@@ -528,8 +548,33 @@ def render_remito_view():
                 it_copy["Nro_Remito"] = nro_remito
                 items_to_save.append(it_copy)
 
+            if items_to_save:
+                first_item = items_to_save[0]
+                remito_header["Articulo_Principal"] = first_item.get("Categoria", "")
+                remito_header["Marca"] = first_item.get("Marca", "")
+                remito_header["Modelo"] = first_item.get("Descripcion", "")
+                remito_header["Cantidad"] = sum(int(item.get("Cantidad", 0)) for item in items_to_save)
+
+            seriales_remito = []
+            for item in items_to_save:
+                if item.get("Categoria") in ["BATERIA", "NEUMATICO"]:
+                    seriales_remito.extend(
+                        s.strip().upper()
+                        for s in str(item.get("Nro_Serie_Bateria_Neumatico", "")).split(",")
+                        if s.strip() and s.strip() != "-"
+                    )
+            if len(seriales_remito) != len(set(seriales_remito)):
+                st.error("El remito contiene dos veces el mismo número marcado. Quite el duplicado antes de emitirlo.")
+                return
+
             with st.spinner("Generando comprobante PDF, actualizando trazabilidad e inventario..."):
-                pdf_path = generate_remito_pdf(remito_header, items_to_save, signature_img)
+                evidencia_images = []
+                for foto in fotos_evidencia or []:
+                    try:
+                        evidencia_images.append(PILImage.open(foto).convert("RGB"))
+                    except Exception:
+                        st.warning(f"No se pudo leer la foto {foto.name}.")
+                pdf_path = generate_remito_pdf(remito_header, items_to_save, signature_img, evidencia_images)
                 remito_header["Link_PDF"] = pdf_path
                 db.guardar_remito(remito_header, items_to_save)
                 
@@ -550,6 +595,13 @@ def render_remito_view():
                     except Exception as e:
                         st.warning(f"⚠️ No se pudo subir la foto: {str(e)}")
                         foto_factura_url_final = ""
+
+                for foto in fotos_evidencia or []:
+                    try:
+                        timestamp = datetime.datetime.now().strftime('%Y%m%d_%H%M%S')
+                        db.subir_archivo_a_drive(foto.getvalue(), f"Evidencia_{nro_remito}_{timestamp}_{foto.name}")
+                    except Exception as e:
+                        st.warning(f"No se pudo subir la evidencia {foto.name}: {str(e)}")
                 
                 # Registrar patentes no catalogadas
                 if patente_final and patente_final != "-":

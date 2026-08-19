@@ -31,7 +31,35 @@ class DatabaseManager:
         self.spreadsheet_ordenes = None
         self.is_connected_gsheets = False
         self._init_connection()
-        self._init_local_backup()
+
+    def _web_sheet(self, title: str, headers: list):
+        """Obtiene o crea una hoja auxiliar dentro del libro de inventario."""
+        if not self.spreadsheet_inventario or not self.is_connected_gsheets:
+            raise RuntimeError("Google Sheets no está conectado")
+        try:
+            sheet = self.spreadsheet_inventario.worksheet(title)
+        except Exception:
+            sheet = self.spreadsheet_inventario.add_worksheet(title=title, rows=1000, cols=max(20, len(headers)))
+            sheet.append_row(headers)
+        if not sheet.row_values(1):
+            sheet.append_row(headers)
+        return sheet
+
+    def _sheet_dataframe(self, title: str, headers: list) -> pd.DataFrame:
+        sheet = self._web_sheet(title, headers)
+        rows = sheet.get_all_records()
+        return pd.DataFrame(rows, columns=headers) if not rows else pd.DataFrame(rows)
+
+    def _save_sheet_dataframe(self, title: str, headers: list, df: pd.DataFrame):
+        sheet = self._web_sheet(title, headers)
+        self._save_sheet_dataframe_external(sheet, headers, df)
+
+    def _save_sheet_dataframe_external(self, sheet, headers: list, df: pd.DataFrame):
+        values = [headers]
+        for record in df.reindex(columns=headers, fill_value="").fillna("").to_dict(orient="records"):
+            values.append([record.get(header, "") for header in headers])
+        sheet.clear()
+        sheet.update(range_name="A1", values=values)
 
     def _init_connection(self):
         try:
@@ -74,6 +102,9 @@ class DatabaseManager:
             self.is_connected_gsheets = False
 
     def _init_local_backup(self):
+        return
+
+        # Código histórico de respaldo local conservado temporalmente debajo.
         prod_file = os.path.join(DATA_DIR, "stock_productos.json")
         if not os.path.exists(prod_file):
             with open(prod_file, "w", encoding="utf-8") as f:
@@ -206,16 +237,22 @@ class DatabaseManager:
                 json.dump(initial_ots, f, ensure_ascii=False, indent=2)
 
     def get_unidades_seriales(self) -> list:
-        unit_file = os.path.join(DATA_DIR, "unidades_seriales.json")
-        if not os.path.exists(unit_file):
-            self._init_local_backup()
-        with open(unit_file, "r", encoding="utf-8") as f:
-            return json.load(f)
+        headers = ["Numero_Marcado", "Tipo_Articulo", "ID_Producto", "Marca", "Modelo_Medida", "Estado", "Vehiculo_Actual", "Fecha_Ultimo_Movimiento", "Historial_JSON"]
+        df = self._sheet_dataframe("UNIDADES_SERIALIZADAS", headers)
+        units = []
+        for row in df.to_dict(orient="records"):
+            row["Historial"] = json.loads(row.pop("Historial_JSON", "[]") or "[]")
+            units.append(row)
+        return units
 
     def save_unidades_seriales(self, units_list: list):
-        unit_file = os.path.join(DATA_DIR, "unidades_seriales.json")
-        with open(unit_file, "w", encoding="utf-8") as f:
-            json.dump(units_list, f, ensure_ascii=False, indent=2)
+        headers = ["Numero_Marcado", "Tipo_Articulo", "ID_Producto", "Marca", "Modelo_Medida", "Estado", "Vehiculo_Actual", "Fecha_Ultimo_Movimiento", "Historial_JSON"]
+        rows = []
+        for unit in units_list:
+            row = dict(unit)
+            row["Historial_JSON"] = json.dumps(row.pop("Historial", []), ensure_ascii=False)
+            rows.append(row)
+        self._save_sheet_dataframe("UNIDADES_SERIALIZADAS", headers, pd.DataFrame(rows))
 
     def get_unidades_disponibles(self, tipo_articulo: str, marca: str = None, modelo: str = None) -> list:
         units = self.get_unidades_seriales()
@@ -354,11 +391,8 @@ class DatabaseManager:
                         break
                 except Exception:
                     pass
-        if df is None or df.empty:
-            veh_file = os.path.join(DATA_DIR, "vehiculos.json")
-            with open(veh_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            df = pd.DataFrame(data)
+        if df is None:
+            df = pd.DataFrame(columns=["PATENTE", "AÑO", "MARCA", "MODELO", "GERENCIA", "STATUS", "FECHA DE BAJA"])
 
         cols_map = {}
         for col in df.columns:
@@ -426,9 +460,18 @@ class DatabaseManager:
         if "ETIQUETA_COMPLETA" in df_save.columns:
             df_save.drop(columns=["ETIQUETA_COMPLETA"], inplace=True)
 
-        veh_file = os.path.join(DATA_DIR, "vehiculos.json")
-        with open(veh_file, "w", encoding="utf-8") as f:
-            json.dump(df_save.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
+        if not self.spreadsheet_vehiculos or not self.is_connected_gsheets:
+            return False
+        try:
+            sheet = self.spreadsheet_vehiculos.worksheet("VEHICULOS")
+            headers = sheet.row_values(1)
+            if not headers:
+                headers = list(df_save.columns)
+            self._save_sheet_dataframe_external(sheet, headers, df_save)
+            return True
+        except Exception as exc:
+            print(f"Error guardando vehículos en Google Sheets: {exc}")
+            return False
 
     def get_ordenes_taller(self, solo_pendientes: bool = False, patente_filtro: str = None) -> pd.DataFrame:
         df = None
@@ -443,11 +486,8 @@ class DatabaseManager:
                 except Exception:
                     pass
 
-        if df is None or df.empty:
-            ot_file = os.path.join(DATA_DIR, "ordenes_taller.json")
-            with open(ot_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            df = pd.DataFrame(data)
+        if df is None:
+            df = pd.DataFrame()
 
         cols_norm = {}
         for c in df.columns:
@@ -480,33 +520,19 @@ class DatabaseManager:
         return df
 
     def get_productos(self) -> pd.DataFrame:
-        df = None
-        if self.is_connected_gsheets and self.spreadsheet_inventario:
-            for sname in ["Stock_Productos", "INVENTARIO", "Stock"]:
-                try:
-                    sheet = self.spreadsheet_inventario.worksheet(sname)
-                    data = sheet.get_all_records()
-                    if data:
-                        df = pd.DataFrame(data)
-                        break
-                except Exception:
-                    pass
-
-        if df is None or df.empty:
-            prod_file = os.path.join(DATA_DIR, "stock_productos.json")
-            with open(prod_file, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            df = pd.DataFrame(data)
+        headers = ["ID", "Categoria", "Marca", "Modelo_Detalle", "Codigo_Pieza", "Stock_Actual", "Stock_Minimo", "Unidad", "Requiere_Serial"]
+        df = self._sheet_dataframe("STOCK_PRODUCTOS", headers)
+        if df.empty:
+            df = pd.DataFrame(get_initial_products())
+            self.save_productos(df)
 
         if "Stock_Actual" in df.columns:
             df["Stock_Actual"] = pd.to_numeric(df["Stock_Actual"], errors="coerce").fillna(0).astype(int)
         return df
 
     def save_productos(self, df: pd.DataFrame):
-        data = df.to_dict(orient="records")
-        prod_file = os.path.join(DATA_DIR, "stock_productos.json")
-        with open(prod_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        headers = ["ID", "Categoria", "Marca", "Modelo_Detalle", "Codigo_Pieza", "Stock_Actual", "Stock_Minimo", "Unidad", "Requiere_Serial"]
+        self._save_sheet_dataframe("STOCK_PRODUCTOS", headers, df)
 
     def add_or_update_producto(self, producto_dict: dict):
         df = self.get_productos()
@@ -539,29 +565,24 @@ class DatabaseManager:
         return True
 
     def get_responsables(self) -> pd.DataFrame:
-        resp_file = os.path.join(DATA_DIR, "responsables.json")
-        with open(resp_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return pd.DataFrame(data)
+        headers = ["nombre", "pin"]
+        df = self._sheet_dataframe("RESPONSABLES", headers)
+        if df.empty:
+            df = pd.DataFrame(RESPONSABLES_INICIALES)
+            self._save_sheet_dataframe("RESPONSABLES", headers, df)
+        return df
 
     def add_responsable(self, nombre: str, pin: str = "1234"):
         df = self.get_responsables()
         if nombre not in df["nombre"].values:
             df = pd.concat([df, pd.DataFrame([{"nombre": nombre, "pin": pin}])], ignore_index=True)
-            resp_file = os.path.join(DATA_DIR, "responsables.json")
-            with open(resp_file, "w", encoding="utf-8") as f:
-                json.dump(df.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
+            self._save_sheet_dataframe("RESPONSABLES", ["nombre", "pin"], df)
 
     def get_receptores(self) -> pd.DataFrame:
-        rec_file = os.path.join(DATA_DIR, "receptores.json")
-        with open(rec_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return pd.DataFrame(data)
+        return self._sheet_dataframe("RECEPTORES", ["nombre", "email", "gerencia"])
 
     def save_receptores(self, df: pd.DataFrame):
-        rec_file = os.path.join(DATA_DIR, "receptores.json")
-        with open(rec_file, "w", encoding="utf-8") as f:
-            json.dump(df.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
+        self._save_sheet_dataframe("RECEPTORES", ["nombre", "email", "gerencia"], df)
 
     def add_or_update_receptor(self, nombre: str, email: str, gerencia: str):
         df = self.get_receptores()
@@ -599,32 +620,45 @@ class DatabaseManager:
             return f"{prefix}-{len(filt)+1:04d}"
 
     def get_remitos(self) -> pd.DataFrame:
-        rem_file = os.path.join(DATA_DIR, "remitos.json")
-        with open(rem_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return pd.DataFrame(data)
+        sheet_rows = self.obtener_remitos_de_gsheet()
+        imported = []
+        for row in sheet_rows:
+            tipo = str(row.get("TIPO_REMITO", "SALIDA")).upper()
+            imported.append({
+                    "Nro_Remito": row.get("ID_REMITO", ""),
+                    "Tipo": tipo,
+                    "Fecha_Hora": f"{row.get('FECHA', '')} {row.get('HORA', '')}".strip(),
+                    "Responsable_Entrega": row.get("RESPONSABLE", ""),
+                    "Receptor_Nombre": row.get("RECEPTOR", ""),
+                    "Receptor_Email": row.get("EMAIL_RECEPTOR", ""),
+                    "Gerencia": row.get("GERENCIA", ""),
+                    "Patente": row.get("PATENTE", ""),
+                    "Articulo_Principal": row.get("ARTICULO_PRINCIPAL", ""),
+                    "Marca": row.get("MARCA", ""),
+                    "Modelo": row.get("MODELO", ""),
+                    "Cantidad": row.get("CANTIDAD", ""),
+                    "Observaciones": row.get("OBSERVACIONES", ""),
+                    "Numero_Factura": row.get("NUMERO_FACTURA", ""),
+                    "Foto_Factura": row.get("FOTO_FACTURA", ""),
+                    "Link_PDF": "",
+                    "Enviado_Email": "NO",
+                })
+        return pd.DataFrame(imported)
 
     def get_remito_items(self, nro_remito: str = None) -> pd.DataFrame:
-        item_file = os.path.join(DATA_DIR, "remito_items.json")
-        with open(item_file, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        df = pd.DataFrame(data)
+        headers = ["Nro_Remito", "ID_Producto", "Categoria", "Marca", "Descripcion", "Codigo_Pieza", "Cantidad", "Nro_Serie_Bateria_Neumatico"]
+        df = self._sheet_dataframe("BASE_DATOS_REMITO_ITEMS", headers)
         if nro_remito and not df.empty and "Nro_Remito" in df.columns:
             return df[df["Nro_Remito"] == nro_remito]
         return df
 
     def guardar_remito(self, remito_header: dict, items: list) -> bool:
-        df_rem = self.get_remitos()
-        df_rem = pd.concat([df_rem, pd.DataFrame([remito_header])], ignore_index=True)
-        rem_file = os.path.join(DATA_DIR, "remitos.json")
-        with open(rem_file, "w", encoding="utf-8") as f:
-            json.dump(df_rem.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
-
-        df_items = self.get_remito_items()
-        df_items = pd.concat([df_items, pd.DataFrame(items)], ignore_index=True)
-        item_file = os.path.join(DATA_DIR, "remito_items.json")
-        with open(item_file, "w", encoding="utf-8") as f:
-            json.dump(df_items.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
+        if not self.is_connected_gsheets:
+            return False
+        item_headers = ["Nro_Remito", "ID_Producto", "Categoria", "Marca", "Descripcion", "Codigo_Pieza", "Cantidad", "Nro_Serie_Bateria_Neumatico"]
+        item_sheet = self._web_sheet("BASE_DATOS_REMITO_ITEMS", item_headers)
+        for item in items:
+            item_sheet.append_row([item.get(header, "") for header in item_headers])
 
         tipo_rem = remito_header.get("Tipo", "SALIDA").upper()
         nro_remito = remito_header.get("Nro_Remito", "")
@@ -699,12 +733,17 @@ class DatabaseManager:
         return True
 
     def mark_remito_email_sent(self, nro_remito: str):
-        df = self.get_remitos()
-        if not df.empty and "Nro_Remito" in df.columns:
-            df.loc[df["Nro_Remito"] == nro_remito, "Enviado_Email"] = "SI"
-            rem_file = os.path.join(DATA_DIR, "remitos.json")
-            with open(rem_file, "w", encoding="utf-8") as f:
-                json.dump(df.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
+        if not self.spreadsheet_inventario:
+            return
+        sheet = self.spreadsheet_inventario.worksheet("BASE_DATOS_REMITOS")
+        headers = sheet.row_values(1)
+        if "ESTADO" in headers:
+            id_col = headers.index("ID_REMITO") + 1
+            status_col = headers.index("ESTADO") + 1
+            for row_idx, value in enumerate(sheet.col_values(id_col)[1:], start=2):
+                if value == nro_remito:
+                    sheet.update_cell(row_idx, status_col, "Email enviado")
+                    break
 
     def guardar_remito_en_gsheet(self, remito_data: dict, numero_factura: str = "", foto_factura_url: str = "") -> bool:
         """
@@ -725,9 +764,10 @@ class DatabaseManager:
             
             # Extraer datos del remito
             id_remito = remito_data.get('Nro_Remito', '')
-            fecha = remito_data.get('Fecha', datetime.datetime.now().strftime('%Y-%m-%d'))
-            hora = remito_data.get('Hora', datetime.datetime.now().strftime('%H:%M:%S'))
-            responsable = remito_data.get('Responsable', '')
+            fecha_hora = str(remito_data.get('Fecha_Hora', ''))
+            fecha = remito_data.get('Fecha', '') or fecha_hora[:10] or datetime.datetime.now().strftime('%Y-%m-%d')
+            hora = remito_data.get('Hora', '') or (fecha_hora[11:16] if len(fecha_hora) >= 16 else datetime.datetime.now().strftime('%H:%M:%S'))
+            responsable = remito_data.get('Responsable', '') or remito_data.get('Responsable_Entrega', '')
             tipo_remito = remito_data.get('Tipo', '').upper()
             
             # Determinar tipo (ENTRADA, SALIDA, TRASPASO)
@@ -900,9 +940,20 @@ class DatabaseManager:
                 # Subir archivo
                 media = MediaIoBaseUpload(BytesIO(archivo_bytes), mimetype='application/octet-stream', resumable=True)
                 file = drive_service.files().create(body=file_metadata, media_body=media, fields='id, webViewLink').execute()
+
+                try:
+                    drive_service.permissions().create(
+                        fileId=file["id"],
+                        body={"type": "anyone", "role": "reader"},
+                        fields="id",
+                    ).execute()
+                except Exception:
+                    # Algunas cuentas Workspace bloquean enlaces publicos; el enlace
+                    # autenticado sigue siendo valido para usuarios autorizados.
+                    pass
                 
                 # Retornar enlace
-                return file.get('webViewLink', '')
+                return f"https://drive.google.com/file/d/{file['id']}/view"
             else:
                 return ""
         
@@ -911,5 +962,6 @@ class DatabaseManager:
             return ""
 
 
+@st.cache_resource(show_spinner=False)
 def get_db():
     return DatabaseManager()

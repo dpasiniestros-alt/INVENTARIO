@@ -74,6 +74,15 @@ def render_historial_view():
             if rem.get("Observaciones"):
                 st.info(f"**Observaciones:** {rem.get('Observaciones')}")
 
+            factura_url = rem.get("Foto_Factura", "")
+            numero_factura = rem.get("Numero_Factura", "")
+            if numero_factura or factura_url:
+                st.markdown(f"**Factura:** {numero_factura or 'Sin número'}")
+                if factura_url and str(factura_url).startswith("http"):
+                    st.link_button("📎 Ver factura adjunta", str(factura_url), use_container_width=True)
+                elif factura_url:
+                    st.caption(f"Archivo de factura: {factura_url}")
+
             df_items = db.get_remito_items(nro_rem)
             if not df_items.empty:
                 st.markdown("##### 📦 Artículos Entregados / Recibidos:")
@@ -86,6 +95,12 @@ def render_historial_view():
                         "Nro_Serie_Bateria_Neumatico": st.column_config.TextColumn("N° Serie / Lote / DOT"),
                         "Cantidad": st.column_config.NumberColumn("Cant.", format="%d un.")
                     }
+                )
+            elif rem.get("Articulo_Principal"):
+                st.markdown("##### 📦 Artículo importado:")
+                st.write(
+                    f"{rem.get('Articulo_Principal')} | {rem.get('Marca', '-')} | "
+                    f"{rem.get('Modelo', '-')} | Cantidad: {rem.get('Cantidad', '-') }"
                 )
 
             st.divider()

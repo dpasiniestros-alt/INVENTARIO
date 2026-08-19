@@ -19,7 +19,7 @@ from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
 TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp_remitos")
 os.makedirs(TEMP_DIR, exist_ok=True)
 
-def generate_remito_pdf(remito_header: dict, items: list, signature_image: PILImage = None) -> str:
+def generate_remito_pdf(remito_header: dict, items: list, signature_image: PILImage = None, evidence_images: list = None) -> str:
     nro_remito = remito_header.get("Nro_Remito", "REMITO")
     safe_nro = str(nro_remito).replace("/", "_").replace("\\", "_")
     pdf_filename = f"{safe_nro}_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
@@ -250,6 +250,25 @@ def generate_remito_pdf(remito_header: dict, items: list, signature_image: PILIm
         ]))
         story.append(obs_table)
         story.append(Spacer(1, 10))
+
+    if evidence_images:
+        story.append(Paragraph("<b>Fotos de evidencia:</b>", style_bold_label))
+        evidence_cells = []
+        for image in evidence_images:
+            try:
+                buffer = io.BytesIO()
+                image.thumbnail((500, 500))
+                image.save(buffer, format="JPEG", quality=85)
+                buffer.seek(0)
+                evidence_cells.append(RLImage(buffer, width=7.5 * cm, height=7.5 * cm, kind="proportional"))
+            except Exception:
+                continue
+        for index in range(0, len(evidence_cells), 2):
+            row = evidence_cells[index:index + 2]
+            if len(row) == 1:
+                row.append(Spacer(7.5 * cm, 7.5 * cm))
+            story.append(Table([row], colWidths=[8.5 * cm, 8.5 * cm]))
+            story.append(Spacer(1, 6))
 
     story.append(Paragraph(
         "<i>Certifico que la información provista es correcta y los elementos fueron entregados / recibidos de plena conformidad a la fecha y hora indicadas.</i>",
