@@ -47,8 +47,21 @@ class DatabaseManager:
 
     def _sheet_dataframe(self, title: str, headers: list) -> pd.DataFrame:
         sheet = self._web_sheet(title, headers)
-        rows = sheet.get_all_records()
-        return pd.DataFrame(rows, columns=headers) if not rows else pd.DataFrame(rows)
+        try:
+            # get_all_records falla si la hoja tiene encabezados repetidos o
+            # restos de una creacion incompleta. Los valores crudos no tienen
+            # esa restriccion y permiten reconstruir las columnas esperadas.
+            values = sheet.get_all_values()
+            if len(values) <= 1:
+                return pd.DataFrame(columns=headers)
+            rows = []
+            for values_row in values[1:]:
+                padded = list(values_row) + [""] * max(0, len(headers) - len(values_row))
+                rows.append(padded[:len(headers)])
+            return pd.DataFrame(rows, columns=headers)
+        except Exception as exc:
+            print(f"Error leyendo la hoja {title}: {exc}")
+            return pd.DataFrame(columns=headers)
 
     def _save_sheet_dataframe(self, title: str, headers: list, df: pd.DataFrame):
         sheet = self._web_sheet(title, headers)
@@ -569,7 +582,10 @@ class DatabaseManager:
         df = self._sheet_dataframe("RESPONSABLES", headers)
         if df.empty:
             df = pd.DataFrame(RESPONSABLES_INICIALES)
-            self._save_sheet_dataframe("RESPONSABLES", headers, df)
+            try:
+                self._save_sheet_dataframe("RESPONSABLES", headers, df)
+            except Exception as exc:
+                print(f"Error inicializando RESPONSABLES: {exc}")
         return df
 
     def add_responsable(self, nombre: str, pin: str = "1234"):
@@ -838,8 +854,14 @@ class DatabaseManager:
             return []
         
         try:
-            sheet = self.spreadsheet_inventario.worksheet('BASE_DATOS_REMITOS')
-            data = sheet.get_all_records()
+            headers = [
+                'ID_REMITO', 'FECHA', 'HORA', 'RESPONSABLE', 'TIPO_REMITO',
+                'ARTICULO_PRINCIPAL', 'MARCA', 'MODELO', 'CANTIDAD', 'GERENCIA',
+                'PATENTE', 'RECEPTOR', 'EMAIL_RECEPTOR', 'REGION_EDENOR',
+                'NUMERO_FACTURA', 'FOTO_FACTURA', 'OBSERVACIONES', 'ESTADO',
+                'FECHA_PROCESAMIENTO'
+            ]
+            data = self._sheet_dataframe('BASE_DATOS_REMITOS', headers).to_dict(orient='records')
             
             if filtro_tipo:
                 data = [r for r in data if r.get('TIPO_REMITO', '').lower() == filtro_tipo.lower()]
@@ -875,7 +897,7 @@ class DatabaseManager:
                 sheet.append_row(headers)
             
             # Verificar si ya existe
-            all_data = sheet.get_all_records()
+            all_data = self._sheet_dataframe('PATENTES_NO_CATALOGADAS', ['PATENTE', 'GERENCIA', 'RECEPTOR', 'REMITO_ID', 'FECHA_USO', 'ESTADO', 'OBSERVACIONES']).to_dict(orient='records')
             for row in all_data:
                 if row.get('PATENTE', '').upper() == patente.upper():
                     # Ya existe, actualizar
