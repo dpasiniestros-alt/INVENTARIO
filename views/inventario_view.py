@@ -17,6 +17,8 @@ def render_inventario_view():
         st.warning("No hay productos cargados en el inventario.")
         return
 
+    df_prod["Stock_Actual"] = pd.to_numeric(df_prod["Stock_Actual"], errors="coerce").fillna(0)
+    df_prod["Stock_Minimo"] = pd.to_numeric(df_prod["Stock_Minimo"], errors="coerce").fillna(0)
     total_articulos = len(df_prod)
     total_stock_unidades = df_prod["Stock_Actual"].sum()
     criticos = df_prod[df_prod["Stock_Actual"] <= df_prod["Stock_Minimo"]]

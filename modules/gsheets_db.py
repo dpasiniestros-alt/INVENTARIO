@@ -541,6 +541,8 @@ class DatabaseManager:
 
         if "Stock_Actual" in df.columns:
             df["Stock_Actual"] = pd.to_numeric(df["Stock_Actual"], errors="coerce").fillna(0).astype(int)
+        if "Stock_Minimo" in df.columns:
+            df["Stock_Minimo"] = pd.to_numeric(df["Stock_Minimo"], errors="coerce").fillna(0).astype(int)
         return df
 
     def save_productos(self, df: pd.DataFrame):
@@ -747,6 +749,33 @@ class DatabaseManager:
             )
 
         return True
+
+    def reiniciar_datos_operativos(self) -> bool:
+        """Deja el inventario operativo en cero sin borrar catalogo ni flota."""
+        if not self.is_connected_gsheets:
+            return False
+        try:
+            productos = self.get_productos()
+            if not productos.empty:
+                productos["Stock_Actual"] = 0
+                self.save_productos(productos)
+
+            unidades_headers = ["Numero_Marcado", "Tipo_Articulo", "ID_Producto", "Marca", "Modelo_Medida", "Estado", "Vehiculo_Actual", "Fecha_Ultimo_Movimiento", "Historial_JSON"]
+            self._save_sheet_dataframe("UNIDADES_SERIALIZADAS", unidades_headers, pd.DataFrame(columns=unidades_headers))
+
+            remitos_headers = [
+                "ID_REMITO", "FECHA", "HORA", "RESPONSABLE", "TIPO_REMITO", "ARTICULO_PRINCIPAL",
+                "MARCA", "MODELO", "CANTIDAD", "GERENCIA", "PATENTE", "RECEPTOR", "EMAIL_RECEPTOR",
+                "REGION_EDENOR", "NUMERO_FACTURA", "FOTO_FACTURA", "OBSERVACIONES", "ESTADO", "FECHA_PROCESAMIENTO"
+            ]
+            self._save_sheet_dataframe("BASE_DATOS_REMITOS", remitos_headers, pd.DataFrame(columns=remitos_headers))
+
+            items_headers = ["Nro_Remito", "ID_Producto", "Categoria", "Marca", "Descripcion", "Codigo_Pieza", "Cantidad", "Nro_Serie_Bateria_Neumatico"]
+            self._save_sheet_dataframe("BASE_DATOS_REMITO_ITEMS", items_headers, pd.DataFrame(columns=items_headers))
+            return True
+        except Exception as exc:
+            print(f"Error reiniciando datos operativos: {exc}")
+            return False
 
     def mark_remito_email_sent(self, nro_remito: str):
         if not self.spreadsheet_inventario:
