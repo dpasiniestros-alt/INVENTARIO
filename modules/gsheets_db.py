@@ -706,5 +706,109 @@ class DatabaseManager:
             with open(rem_file, "w", encoding="utf-8") as f:
                 json.dump(df.to_dict(orient="records"), f, ensure_ascii=False, indent=2)
 
+    def guardar_remito_en_gsheet(self, remito_data: dict, numero_factura: str = "", foto_factura_url: str = "") -> bool:
+        """
+        Guarda un remito en la hoja BASE_DATOS_REMITOS del LIBRO Inventario/Remitos.
+        
+        Parámetros:
+        - remito_data: dict con los datos del remito
+        - numero_factura: str con el número de factura (solo para ENTRADA)
+        - foto_factura_url: str con la URL de la foto (solo para ENTRADA)
+        
+        Retorna: True si fue exitoso, False si no
+        """
+        if not self.spreadsheet_inventario or not self.is_connected_gsheets:
+            return False
+        
+        try:
+            sheet = self.spreadsheet_inventario.worksheet('BASE_DATOS_REMITOS')
+            
+            # Extraer datos del remito
+            id_remito = remito_data.get('Nro_Remito', '')
+            fecha = remito_data.get('Fecha', datetime.datetime.now().strftime('%Y-%m-%d'))
+            hora = remito_data.get('Hora', datetime.datetime.now().strftime('%H:%M:%S'))
+            responsable = remito_data.get('Responsable', '')
+            tipo_remito = remito_data.get('Tipo', '').upper()
+            
+            # Determinar tipo (ENTRADA, SALIDA, TRASPASO)
+            if 'ENTRADA' in tipo_remito:
+                tipo_str = 'Entrada'
+            elif 'TRASPASO' in tipo_remito:
+                tipo_str = 'Traspaso'
+            else:
+                tipo_str = 'Salida'
+            
+            articulo_principal = remito_data.get('Articulo_Principal', '')
+            marca = remito_data.get('Marca', '')
+            modelo = remito_data.get('Modelo', '')
+            cantidad = remito_data.get('Cantidad', 0)
+            
+            gerencia = remito_data.get('Gerencia', '')
+            patente = remito_data.get('Patente', '')
+            receptor = remito_data.get('Receptor_Nombre', '')
+            email_receptor = remito_data.get('Receptor_Email', '')
+            
+            # Para región EDENOR
+            region = ''
+            if gerencia.upper() == 'EDENOR':
+                region = remito_data.get('Region', '')
+            
+            observaciones = remito_data.get('Observaciones', '')
+            
+            # Nueva fila
+            row = [
+                id_remito,
+                fecha,
+                hora,
+                responsable,
+                tipo_str,
+                articulo_principal,
+                marca,
+                modelo,
+                cantidad,
+                gerencia,
+                patente,
+                receptor,
+                email_receptor,
+                region,
+                numero_factura,
+                foto_factura_url,
+                observaciones,
+                'Procesado',
+                datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            ]
+            
+            sheet.append_row(row)
+            return True
+        
+        except Exception as e:
+            print(f"Error guardando remito en Google Sheets: {e}")
+            return False
+
+    def obtener_remitos_de_gsheet(self, filtro_tipo: str = None) -> list:
+        """
+        Obtiene los remitos de la hoja BASE_DATOS_REMITOS.
+        
+        Parámetros:
+        - filtro_tipo: 'Entrada', 'Salida', 'Traspaso' (opcional)
+        
+        Retorna: Lista de remitos
+        """
+        if not self.spreadsheet_inventario:
+            return []
+        
+        try:
+            sheet = self.spreadsheet_inventario.worksheet('BASE_DATOS_REMITOS')
+            data = sheet.get_all_records()
+            
+            if filtro_tipo:
+                data = [r for r in data if r.get('TIPO_REMITO', '').lower() == filtro_tipo.lower()]
+            
+            return data
+        
+        except Exception:
+            return []
+
+
 def get_db():
     return DatabaseManager()
