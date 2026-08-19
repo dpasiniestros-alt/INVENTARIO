@@ -159,18 +159,13 @@ def render_remito_view():
             gerencia_final = st.text_input("Especifique otra gerencia:").strip()
 
         st.markdown("#### 🚗 3. Vehículo de la Flota (Destino)")
-        sel_veh_lbl = st.selectbox("Seleccione Vehículo:", ["Sin Vehículo / No Aplica"] + lista_veh_etiquetas + ["+ Agregar nuevo vehículo..."])
-        if sel_veh_lbl == "+ Agregar nuevo vehículo...":
-            c_nv1, c_nv2 = st.columns(2)
-            with c_nv1:
-                n_pat = st.text_input("Patente:", placeholder="AF123ZZ").strip().upper()
-                n_ano = st.text_input("Año:", placeholder="2023").strip()
-            with c_nv2:
-                n_mar = st.text_input("Marca:", placeholder="Fiat").strip()
-                n_mod = st.text_input("Modelo:", placeholder="Cronos").strip()
-            if n_pat:
-                patente_final = f"[{n_pat}] {n_ano} {n_mar} {n_mod}".strip()
-                db.add_vehiculo_si_no_existe(n_pat, ano=n_ano, marca=n_mar, modelo=n_mod)
+        sel_veh_lbl = st.selectbox("Seleccione Vehículo:", ["Sin Vehículo / No Aplica"] + lista_veh_etiquetas)
+        if sel_veh_lbl == "Sin Vehículo / No Aplica":
+            patente_manual = st.text_input(
+                "Patente no incluida en VEHICULOS (opcional):",
+                placeholder="Se registrará para revisión, sin modificar el libro DPA"
+            ).strip().upper()
+            patente_final = patente_manual
         elif sel_veh_lbl != "Sin Vehículo / No Aplica":
             patente_final = sel_veh_lbl
 

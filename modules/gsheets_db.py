@@ -395,12 +395,17 @@ class DatabaseManager:
     def get_vehiculos(self, solo_activos: bool = False) -> pd.DataFrame:
         df = None
         if self.is_connected_gsheets and self.spreadsheet_vehiculos:
-            for sheet_name in ["VEHICULO", "Vehiculos", "Patentes"]:
+            for sheet_name in ["VEHICULOS", "VEHICULO", "Vehiculos", "Patentes"]:
                 try:
                     sheet = self.spreadsheet_vehiculos.worksheet(sheet_name)
-                    data = sheet.get_all_records()
-                    if data:
-                        df = pd.DataFrame(data)
+                    values = sheet.get_all_values()
+                    if len(values) > 1:
+                        headers = [str(value).strip() for value in values[0]]
+                        rows = []
+                        for values_row in values[1:]:
+                            padded = list(values_row) + [""] * max(0, len(headers) - len(values_row))
+                            rows.append(padded[:len(headers)])
+                        df = pd.DataFrame(rows, columns=headers)
                         break
                 except Exception:
                     pass
@@ -450,41 +455,11 @@ class DatabaseManager:
         return df
 
     def add_vehiculo_si_no_existe(self, patente: str, gerencia: str = "", ano: str = "", marca: str = "", modelo: str = ""):
-        patente = patente.strip().upper()
-        if not patente:
-            return
-        df = self.get_vehiculos(solo_activos=False)
-        if patente not in df["PATENTE"].values:
-            nuevo = {
-                "PATENTE": patente,
-                "AÑO": ano,
-                "MARCA": marca,
-                "MODELO": modelo,
-                "GERENCIA": gerencia,
-                "STATUS": "ACTIVO",
-                "FECHA DE BAJA": "",
-                "OBSERVACIONES": "Agregado desde Remito"
-            }
-            df = pd.concat([df, pd.DataFrame([nuevo])], ignore_index=True)
-            self.save_vehiculos(df)
+        # El libro DPA PARQUE Automotor es solo lectura para esta aplicación.
+        return False
 
     def save_vehiculos(self, df: pd.DataFrame):
-        df_save = df.copy()
-        if "ETIQUETA_COMPLETA" in df_save.columns:
-            df_save.drop(columns=["ETIQUETA_COMPLETA"], inplace=True)
-
-        if not self.spreadsheet_vehiculos or not self.is_connected_gsheets:
-            return False
-        try:
-            sheet = self.spreadsheet_vehiculos.worksheet("VEHICULOS")
-            headers = sheet.row_values(1)
-            if not headers:
-                headers = list(df_save.columns)
-            self._save_sheet_dataframe_external(sheet, headers, df_save)
-            return True
-        except Exception as exc:
-            print(f"Error guardando vehículos en Google Sheets: {exc}")
-            return False
+        return False
 
     def get_ordenes_taller(self, solo_pendientes: bool = False, patente_filtro: str = None) -> pd.DataFrame:
         df = None

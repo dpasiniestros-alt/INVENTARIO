@@ -95,39 +95,7 @@ def render_admin_view():
             hide_index=True
         )
 
-        with st.expander("➕ Registrar o Modificar Estado de Vehículo / Patente"):
-            with st.form("form_mod_veh"):
-                v_pat = st.text_input("Patente (Dominio):", placeholder="Ej: AF123ZZ").strip().upper()
-                v_ger = st.selectbox("Gerencia Asignada:", GERENCIAS)
-                v_stat = st.selectbox("Estado (Status):", ["ACTIVO", "ACTIVO (OTROS)", "BAJA"])
-                v_baja = st.text_input("Fecha de Baja (si corresponde):", placeholder="YYYY-MM-DD").strip()
-                v_mod = st.text_input("Modelo / Descripción del Vehículo:", placeholder="Ej: Cronos 1.3 / Sprinter").strip()
-
-                if st.form_submit_button("Guardar Vehículo", use_container_width=True):
-                    if not v_pat:
-                        st.error("Ingrese la patente.")
-                    else:
-                        df_all_v = db.get_vehiculos(solo_activos=False)
-                        match = df_all_v[df_all_v["PATENTE"] == v_pat]
-                        if not match.empty:
-                            idx_v = match.index[0]
-                            df_all_v.at[idx_v, "GERENCIA"] = v_ger
-                            df_all_v.at[idx_v, "STATUS"] = v_stat
-                            df_all_v.at[idx_v, "FECHA DE BAJA"] = v_baja
-                            df_all_v.at[idx_v, "MODELO"] = v_mod
-                        else:
-                            new_v = {
-                                "PATENTE": v_pat,
-                                "GERENCIA": v_ger,
-                                "STATUS": v_stat,
-                                "FECHA DE BAJA": v_baja,
-                                "MODELO": v_mod,
-                                "OBSERVACIONES": ""
-                            }
-                            df_all_v = pd.concat([df_all_v, pd.DataFrame([new_v])], ignore_index=True)
-                        db.save_vehiculos(df_all_v)
-                        st.success(f"Vehículo {v_pat} guardado con éxito.")
-                        st.rerun()
+        st.info("La flota se lee exclusivamente desde el libro DPA PARQUE Automotor Grupo Sima, hoja VEHICULOS. Esta aplicación no modifica ese libro.")
 
     with tab3:
         st.markdown("### 👨‍🔧 Personal Autorizado de Taller")
@@ -177,7 +145,9 @@ def render_admin_view():
         st.markdown("### ☁️ Estado de Conexión en la Nube")
         
         if db.is_connected_gsheets:
-            st.success(f"🟢 Conectado exitosamente a Google Sheets (Libro ID: {db.spreadsheet_id})")
+            inv_id = getattr(db.spreadsheet_inventario, "id", "desconocido")
+            veh_id = getattr(db.spreadsheet_vehiculos, "id", "desconocido")
+            st.success(f"🟢 Conectado a Google Sheets. Inventario: {inv_id} | Flota (solo lectura): {veh_id}")
         else:
             st.warning("🟡 Funcionando en modo de almacenamiento local seguro. Para conectar directamente con tu Google Sheets en la nube, configura las credenciales en secrets.toml.")
 
