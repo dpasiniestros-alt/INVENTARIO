@@ -401,11 +401,17 @@ class DatabaseManager:
                     values = sheet.get_all_values()
                     if len(values) > 1:
                         headers = [str(value).strip() for value in values[0]]
+                        unique_headers = []
+                        header_counts = {}
+                        for header in headers:
+                            count = header_counts.get(header, 0)
+                            unique_headers.append(header if count == 0 else f"{header}__{count}")
+                            header_counts[header] = count + 1
                         rows = []
                         for values_row in values[1:]:
-                            padded = list(values_row) + [""] * max(0, len(headers) - len(values_row))
-                            rows.append(padded[:len(headers)])
-                        df = pd.DataFrame(rows, columns=headers)
+                            padded = list(values_row) + [""] * max(0, len(unique_headers) - len(values_row))
+                            rows.append(padded[:len(unique_headers)])
+                        df = pd.DataFrame(rows, columns=unique_headers)
                         break
                 except Exception:
                     pass
@@ -433,18 +439,17 @@ class DatabaseManager:
         if cols_map:
             df.rename(columns=cols_map, inplace=True)
 
-        # La hoja VEHICULOS tiene varias columnas repetidas (STATUS, GERENCIA,
-        # etc.). Consolidarlas evita que pandas devuelva un DataFrame al pedir
-        # una columna y permite usar siempre el primer dato no vacio.
+        # Varias columnas de la hoja pueden mapear al mismo nombre canonico.
+        # Combina sus valores y deja una sola columna para pandas/Streamlit.
+        for canonical in list(dict.fromkeys(cols_map.values())):
+            duplicated = [column for column in df.columns if column == canonical]
+            if len(duplicated) > 1:
+                merged = df[duplicated].replace("", pd.NA).bfill(axis=1).iloc[:, 0].fillna("")
+                df = df.drop(columns=duplicated)
+                df[canonical] = merged
+
         if df.columns.duplicated().any():
-            consolidated = {}
-            for column in dict.fromkeys(df.columns):
-                same_columns = df.loc[:, df.columns == column]
-                if same_columns.shape[1] == 1:
-                    consolidated[column] = same_columns.iloc[:, 0]
-                else:
-                    consolidated[column] = same_columns.replace("", pd.NA).bfill(axis=1).iloc[:, 0].fillna("")
-            df = pd.DataFrame(consolidated, index=df.index)
+            df = df.loc[:, ~df.columns.duplicated(keep="first")]
 
         for req in ["PATENTE", "AÑO", "MARCA", "MODELO", "GERENCIA", "STATUS", "FECHA DE BAJA"]:
             if req not in df.columns:

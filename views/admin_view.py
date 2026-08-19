@@ -89,11 +89,15 @@ def render_admin_view():
         if q_pat and not df_veh.empty:
             df_veh = df_veh[df_veh["PATENTE"].str.contains(q_pat, na=False)]
 
-        st.dataframe(
-            df_veh,
-            use_container_width=True,
-            hide_index=True
-        )
+        df_veh_display = df_veh.loc[:, ~df_veh.columns.duplicated(keep="first")].copy()
+        if df_veh_display.empty:
+            st.warning("No se pudo leer la hoja VEHICULOS del libro DPA en este momento.")
+        else:
+            st.dataframe(
+                df_veh_display,
+                use_container_width=True,
+                hide_index=True
+            )
 
         st.info("La flota se lee exclusivamente desde el libro DPA PARQUE Automotor Grupo Sima, hoja VEHICULOS. Esta aplicación no modifica ese libro.")
 
