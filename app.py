@@ -49,9 +49,19 @@ from views.trazabilidad_view import render_trazabilidad_view
 from views.historial_view import render_historial_view
 from views.ordenes_view import render_ordenes_view
 from views.admin_view import render_admin_view
+from modules.auth import is_user_authenticated, render_login, logout_user
 
 def main():
+    if not is_user_authenticated():
+        render_login()
+        return
+
     st.title("🚗 Taller Automotor")
+
+    with st.sidebar:
+        st.markdown(f"**Usuario:** {st.session_state.get('current_user', '')}")
+        if st.button("Cerrar sesión", use_container_width=True):
+            logout_user()
     
     menu_options = [
         "📋 Nuevo Remito",
