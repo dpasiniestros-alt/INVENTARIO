@@ -51,8 +51,8 @@ class DatabaseManager:
         return sheet
 
     def _sheet_dataframe(self, title: str, headers: list) -> pd.DataFrame:
-        sheet = self._web_sheet(title, headers)
         try:
+            sheet = self._web_sheet(title, headers)
             # get_all_records falla si la hoja tiene encabezados repetidos o
             # restos de una creacion incompleta. Los valores crudos no tienen
             # esa restriccion y permiten reconstruir las columnas esperadas.
