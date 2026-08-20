@@ -33,6 +33,17 @@ class DatabaseSmokeTests(unittest.TestCase):
         self.assertEqual(result.iloc[0]["Stock_Actual"], 0)
         self.assertEqual(result.iloc[0]["Stock_Minimo"], 2)
 
+    def test_marked_number_cannot_be_reused_for_same_type(self):
+        db = DatabaseManager.__new__(DatabaseManager)
+        db.get_unidades_seriales = lambda: [
+            {"Numero_Marcado": "BAT-23", "Tipo_Articulo": "BATERIA"},
+            {"Numero_Marcado": "23", "Tipo_Articulo": "NEUMATICO"},
+        ]
+
+        self.assertEqual(db.numeros_marcados_existentes("BATERIA", ["bat-23", "BAT-24"]), ["BAT-23"])
+        self.assertEqual(db.numeros_marcados_existentes("NEUMATICO", ["23"]), ["23"])
+        self.assertEqual(db.numeros_marcados_existentes("BATERIA", ["23"]), [])
+
 
 if __name__ == "__main__":
     unittest.main()

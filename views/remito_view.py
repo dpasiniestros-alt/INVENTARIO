@@ -271,7 +271,8 @@ def render_remito_view():
 
                     else:
                         # ENTRADA
-                        cant = st.number_input("Cantidad a Ingresar:", min_value=1, value=1, step=1)
+                        item_key = str(p_selected.get("ID", cat_sel)).replace(" ", "_")
+                        cant = st.number_input("Cantidad a Ingresar:", min_value=1, value=1, step=1, key=f"qty_{cat_sel}_{item_key}")
                         st.caption(f"Ingrese los números marcados correspondientes a las {cant} unidad(es):")
                         
                         seriales_list = []
@@ -279,12 +280,12 @@ def render_remito_view():
                             cols_num = st.columns(cant)
                             for idx_c in range(cant):
                                 with cols_num[idx_c]:
-                                    val_n = st.text_input(f"Unidad #{idx_c+1}:", key=f"in_num_{idx_c}", placeholder=f"N° {idx_c+1}").strip()
+                                    val_n = st.text_input(f"Unidad #{idx_c+1}:", key=f"in_num_{cat_sel}_{item_key}_{idx_c}", placeholder=f"N° {idx_c+1}").strip()
                                     if val_n:
                                         seriales_list.append(val_n)
                             seriales_str = ", ".join(seriales_list)
                         else:
-                            seriales_str = st.text_input(f"Ingrese los {cant} números separados por coma o espacio:", placeholder="Ej: 1, 32, 52, 4, 18").strip()
+                            seriales_str = st.text_input(f"Ingrese los {cant} números separados por coma o espacio:", placeholder="Ej: 1, 32, 52, 4, 18", key=f"seriales_{cat_sel}_{item_key}").strip()
 
                 else:
                     # Otros articulos
@@ -306,9 +307,13 @@ def render_remito_view():
                                 usados.extend(str(cart_item.get("Nro_Serie_Bateria_Neumatico", "")).upper().split(","))
                         usados = [s.strip() for s in usados if s.strip() and s.strip() != "-"]
                         repetidos = sorted(set(nuevos_seriales).intersection(usados))
+                        existentes = db.numeros_marcados_existentes(cat_sel, nuevos_seriales) if es_entrada else []
                         if len(nuevos_seriales) != len(set(nuevos_seriales)) or repetidos:
                             detalle = ", ".join(sorted(set(repetidos)))
                             st.error(f"No puede agregar dos veces la misma unidad marcada{': ' + detalle if detalle else ''}.")
+                            st.stop()
+                        if existentes:
+                            st.error(f"Los siguientes números de {cat_sel} ya existen: {', '.join(existentes)}. Verifique el marcado físico antes de continuar.")
                             st.stop()
                         st.session_state["cart_items"].append({
                             "ID_Producto": p_selected["ID"],
@@ -319,6 +324,10 @@ def render_remito_view():
                             "Cantidad": int(cant),
                             "Nro_Serie_Bateria_Neumatico": seriales_str if seriales_str else "-"
                         })
+                        st.session_state.pop(f"qty_{cat_sel}_{item_key}", None)
+                        st.session_state.pop(f"seriales_{cat_sel}_{item_key}", None)
+                        for idx_c in range(5):
+                            st.session_state.pop(f"in_num_{cat_sel}_{item_key}_{idx_c}", None)
                         st.toast(f"Agregado: {p_selected['Modelo_Detalle']} (x{cant})")
                         st.rerun()
 
@@ -377,12 +386,13 @@ def render_remito_view():
                 with col_g2:
                     n_codigo = st.text_input("Código de Pieza (opcional):").strip()
 
-            n_cant = st.number_input("Cantidad a Ingresar:", min_value=1, value=1, step=1)
+            new_item_key = f"nuevo_{cat_sel}"
+            n_cant = st.number_input("Cantidad a Ingresar:", min_value=1, value=1, step=1, key=f"new_qty_{new_item_key}")
             
             n_seriales_str = "-"
             if cat_sel in ["BATERIA", "NEUMATICO"]:
                 st.caption(f"Ingrese los números marcados de cada una de las {n_cant} unidad(es):")
-                n_seriales_str = st.text_input(f"Números Marcados (separados por coma):", placeholder="Ej: 101, 102, 103").strip()
+                n_seriales_str = st.text_input(f"Números Marcados (separados por coma):", placeholder="Ej: 101, 102, 103", key=f"new_seriales_{new_item_key}").strip()
 
             if st.button("✨ Dar de Alta y Agregar al Remito", use_container_width=True):
                 if not n_marca or not n_modelo:
@@ -390,6 +400,14 @@ def render_remito_view():
                 elif cat_sel in ["BATERIA", "NEUMATICO"] and not n_seriales_str:
                     st.error("Debe ingresar los números marcados para las baterías o neumáticos.")
                 else:
+                    nuevos_seriales = [s.strip().upper() for s in n_seriales_str.split(",") if s.strip() and s.strip() != "-"]
+                    existentes = db.numeros_marcados_existentes(cat_sel, nuevos_seriales)
+                    if len(nuevos_seriales) != len(set(nuevos_seriales)):
+                        st.error(f"No puede repetir un número marcado dentro del alta de {cat_sel}.")
+                        st.stop()
+                    if existentes:
+                        st.error(f"Los siguientes números de {cat_sel} ya existen: {', '.join(existentes)}. Verifique el marcado físico antes de continuar.")
+                        st.stop()
                     new_id = f"{cat_sel[:3]}-{datetime.datetime.now().strftime('%m%d%H%M%S')}"
                     prod_dict_new = {
                         "ID": new_id,
@@ -402,7 +420,9 @@ def render_remito_view():
                         "Unidad": "UNIDAD",
                         "Requiere_Serial": "SI" if cat_sel in ["BATERIA", "NEUMATICO"] else "NO"
                     }
-                    db.add_or_update_producto(prod_dict_new)
+                    if not db.add_or_update_producto(prod_dict_new):
+                        st.error("No se pudo guardar el producto en Google Sheets. El artículo no fue agregado al remito.")
+                        st.stop()
                     st.session_state["cart_items"].append({
                         "ID_Producto": new_id,
                         "Categoria": cat_sel,
@@ -412,6 +432,8 @@ def render_remito_view():
                         "Cantidad": int(n_cant),
                         "Nro_Serie_Bateria_Neumatico": n_seriales_str if n_seriales_str else "-"
                     })
+                    st.session_state.pop(f"new_qty_{new_item_key}", None)
+                    st.session_state.pop(f"new_seriales_{new_item_key}", None)
                     st.success(f"Producto creado: {n_marca} | {n_modelo}")
                     st.rerun()
 

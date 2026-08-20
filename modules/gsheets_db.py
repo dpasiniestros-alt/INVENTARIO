@@ -535,7 +535,6 @@ class DatabaseManager:
         df = self._sheet_dataframe("STOCK_PRODUCTOS", headers)
         if df.empty:
             df = pd.DataFrame(get_initial_products())
-            self.save_productos(df)
 
         if "Stock_Actual" in df.columns:
             df["Stock_Actual"] = pd.to_numeric(df["Stock_Actual"], errors="coerce").fillna(0).astype(int)
@@ -543,20 +542,35 @@ class DatabaseManager:
             df["Stock_Minimo"] = pd.to_numeric(df["Stock_Minimo"], errors="coerce").fillna(0).astype(int)
         return df
 
+    def numeros_marcados_existentes(self, tipo_articulo: str, numeros: list) -> list:
+        buscados = {str(numero).strip().upper() for numero in numeros if str(numero).strip()}
+        if not buscados:
+            return []
+        existentes = {
+            str(unit.get("Numero_Marcado", "")).strip().upper()
+            for unit in self.get_unidades_seriales()
+            if str(unit.get("Tipo_Articulo", "")).strip().upper() == tipo_articulo.upper()
+        }
+        return sorted(buscados.intersection(existentes))
+
     def save_productos(self, df: pd.DataFrame):
         headers = ["ID", "Categoria", "Marca", "Modelo_Detalle", "Codigo_Pieza", "Stock_Actual", "Stock_Minimo", "Unidad", "Requiere_Serial"]
         self._save_sheet_dataframe("STOCK_PRODUCTOS", headers, df)
 
     def add_or_update_producto(self, producto_dict: dict):
-        df = self.get_productos()
-        match = df[df["ID"] == producto_dict["ID"]]
-        if not match.empty:
-            for k, v in producto_dict.items():
-                df.loc[df["ID"] == producto_dict["ID"], k] = v
-        else:
-            new_row = pd.DataFrame([producto_dict])
-            df = pd.concat([df, new_row], ignore_index=True)
-        self.save_productos(df)
+        try:
+            df = self.get_productos()
+            match = df[df["ID"] == producto_dict["ID"]]
+            if not match.empty:
+                for k, v in producto_dict.items():
+                    df.loc[df["ID"] == producto_dict["ID"], k] = v
+            else:
+                new_row = pd.DataFrame([producto_dict])
+                df = pd.concat([df, new_row], ignore_index=True)
+            return self.save_productos(df)
+        except Exception as exc:
+            print(f"Error guardando producto: {exc}")
+            return False
 
     def update_stock(self, producto_id: str, cantidad: int, operacion: str = "salida") -> bool:
         df = self.get_productos()
