@@ -6,6 +6,7 @@ Capa de Persistencia y Conexion con Google Sheets con Trazabilidad Individual de
 import os
 import json
 import datetime
+import time
 import pandas as pd
 import streamlit as st
 from modules.catalog_seed import (
@@ -51,22 +52,24 @@ class DatabaseManager:
         return sheet
 
     def _sheet_dataframe(self, title: str, headers: list) -> pd.DataFrame:
-        try:
-            sheet = self._web_sheet(title, headers)
-            # get_all_records falla si la hoja tiene encabezados repetidos o
-            # restos de una creacion incompleta. Los valores crudos no tienen
-            # esa restriccion y permiten reconstruir las columnas esperadas.
-            values = sheet.get_all_values()
-            if len(values) <= 1:
-                return pd.DataFrame(columns=headers)
-            rows = []
-            for values_row in values[1:]:
-                padded = list(values_row) + [""] * max(0, len(headers) - len(values_row))
-                rows.append(padded[:len(headers)])
-            return pd.DataFrame(rows, columns=headers)
-        except Exception as exc:
-            print(f"Error leyendo la hoja {title}: {exc}")
-            return pd.DataFrame(columns=headers)
+        last_error = None
+        for attempt in range(2):
+            try:
+                sheet = self._web_sheet(title, headers)
+                values = sheet.get_all_values()
+                if len(values) <= 1:
+                    return pd.DataFrame(columns=headers)
+                rows = []
+                for values_row in values[1:]:
+                    padded = list(values_row) + [""] * max(0, len(headers) - len(values_row))
+                    rows.append(padded[:len(headers)])
+                return pd.DataFrame(rows, columns=headers)
+            except Exception as exc:
+                last_error = exc
+                if attempt == 0:
+                    time.sleep(0.4)
+        print(f"Error leyendo la hoja {title}: {last_error}")
+        return pd.DataFrame(columns=headers)
 
     def _save_sheet_dataframe(self, title: str, headers: list, df: pd.DataFrame):
         sheet = self._web_sheet(title, headers)
@@ -533,6 +536,15 @@ class DatabaseManager:
     def get_productos(self) -> pd.DataFrame:
         headers = ["ID", "Categoria", "Marca", "Modelo_Detalle", "Codigo_Pieza", "Stock_Actual", "Stock_Minimo", "Unidad", "Requiere_Serial"]
         df = self._sheet_dataframe("STOCK_PRODUCTOS", headers)
+        if df.empty and self.is_connected_gsheets:
+            # Recupera solo el catalogo descriptivo; el stock siempre comienza en cero.
+            catalogo = pd.DataFrame(get_initial_products())
+            catalogo["Stock_Actual"] = 0
+            try:
+                self.save_productos(catalogo)
+            except Exception as exc:
+                print(f"No se pudo restaurar STOCK_PRODUCTOS: {exc}")
+            df = catalogo
 
         if "Stock_Actual" in df.columns:
             df["Stock_Actual"] = pd.to_numeric(df["Stock_Actual"], errors="coerce").fillna(0).astype(int)
