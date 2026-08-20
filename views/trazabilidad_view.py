@@ -125,10 +125,13 @@ def render_trazabilidad_view():
         st.info("Utilice esta opción si ingresó unidades a stock pero aún no las había marcado con su número definitivo.")
 
         if units:
-            opciones_u = [f"#{u['Numero_Marcado']} | [{u['Tipo_Articulo']}] {u['Marca']} - {u['Modelo_Medida']} ({u['Estado']})" for u in units]
+            opciones_u = [
+                f"{'⚠️ ' if str(u.get('Numero_Marcado', '')).startswith('SIN_MARCAR-') else ''}#{u['Numero_Marcado']} | [{u['Tipo_Articulo']}] {u['Marca']} - {u['Modelo_Medida']} ({u['Estado']})"
+                for u in units
+            ]
             sel_u_edit = st.selectbox("Seleccione la unidad a modificar:", opciones_u)
             
-            num_actual = sel_u_edit.split("|")[0].replace("#", "").strip()
+            num_actual = sel_u_edit.split("|")[0].replace("#", "").replace("⚠️", "").strip()
             u_obj = db.buscar_historial_unidad(num_actual)
 
             if u_obj:
@@ -152,6 +155,13 @@ def render_trazabilidad_view():
                     if st.form_submit_button("Guardar Cambios de Unidad", use_container_width=True):
                         if not nuevo_num:
                             st.error("Debe ingresar un número.")
+                        elif any(
+                            str(item.get("Numero_Marcado", "")).strip().upper() == nuevo_num.upper()
+                            and str(item.get("Numero_Marcado", "")).strip().lower() != num_actual.lower()
+                            and str(item.get("Tipo_Articulo", "")).strip().upper() == str(u_obj.get("Tipo_Articulo", "")).strip().upper()
+                            for item in units
+                        ):
+                            st.error(f"El número {nuevo_num} ya existe para otra unidad del mismo tipo. Verifique el marcado físico.")
                         else:
                             # Actualizar en lista
                             for item in units:

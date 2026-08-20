@@ -214,6 +214,9 @@ def render_remito_view():
     st.markdown("#### 📦 Selección de Artículos y Números Marcados")
     
     df_prod = db.get_productos()
+    if df_prod.empty:
+        st.warning("No hay productos disponibles en STOCK_PRODUCTOS. Verifique la conexión con Google Sheets.")
+        return
     categorias_disponibles = sorted(df_prod["Categoria"].unique().tolist()) if not df_prod.empty else []
 
     with st.expander("➕ Agregar Artículo al Remito", expanded=True):
@@ -276,19 +279,19 @@ def render_remito_view():
                         st.caption(f"Ingrese los números marcados correspondientes a las {cant} unidad(es):")
                         
                         seriales_list = []
-                        if cant <= 5:
-                            cols_num = st.columns(cant)
-                            for idx_c in range(cant):
-                                with cols_num[idx_c]:
-                                    val_n = st.text_input(f"Unidad #{idx_c+1}:", key=f"in_num_{cat_sel}_{item_key}_{idx_c}", placeholder=f"N° {idx_c+1}").strip()
+                        for start_idx in range(0, int(cant), 5):
+                            cols_num = st.columns(min(5, int(cant) - start_idx))
+                            for offset, col_num in enumerate(cols_num):
+                                idx_c = start_idx + offset
+                                with col_num:
+                                    val_n = st.text_input(f"Unidad #{idx_c + 1}:", key=f"in_num_{cat_sel}_{item_key}_{idx_c}", placeholder=f"N° {idx_c + 1}").strip()
                                     if val_n:
                                         seriales_list.append(val_n)
-                            seriales_str = ", ".join(seriales_list)
-                        else:
-                            seriales_str = st.text_input(f"Ingrese los {cant} números separados por coma o espacio:", placeholder="Ej: 1, 32, 52, 4, 18", key=f"seriales_{cat_sel}_{item_key}").strip()
+                        seriales_str = ", ".join(seriales_list)
 
                 else:
                     # Otros articulos
+                    item_key = str(p_selected.get("ID", cat_sel)).replace(" ", "_")
                     max_cant = int(p_selected["Stock_Actual"]) if es_salida else 500
                     col_c1, col_c2 = st.columns([1, 2])
                     with col_c1:
@@ -297,9 +300,7 @@ def render_remito_view():
                         seriales_str = "-"
 
                 if st.button("📥 Agregar al Carrito", use_container_width=True):
-                    if cat_sel in ["BATERIA", "NEUMATICO"] and not seriales_str:
-                        st.error(f"Debe especificar los números marcados de {cat_sel}.")
-                    else:
+                    if cat_sel in ["BATERIA", "NEUMATICO"] or seriales_str == "-":
                         nuevos_seriales = [s.strip().upper() for s in str(seriales_str).split(",") if s.strip() and s.strip() != "-"]
                         usados = []
                         for cart_item in st.session_state["cart_items"]:
@@ -345,9 +346,13 @@ def render_remito_view():
                     if n_marca == "OTRA":
                         n_marca = st.text_input("Escriba Marca:").strip()
                 with col_b2:
-                    n_volt = st.selectbox("Voltaje:", VOLTAJES_BATERIA)
+                    n_volt = st.selectbox("Voltaje:", VOLTAJES_BATERIA + ["OTRO"])
+                    if n_volt == "OTRO":
+                        n_volt = st.text_input("Escriba voltaje:").strip()
                 with col_b3:
-                    n_ah = st.selectbox("Capacidad (Ah):", AMPERAJES_BATERIA)
+                    n_ah = st.selectbox("Capacidad (Ah):", AMPERAJES_BATERIA + ["OTRA"])
+                    if n_ah == "OTRA":
+                        n_ah = st.text_input("Escriba capacidad:").strip()
                 n_modelo = f"{n_volt} {n_ah}"
 
             elif cat_sel == "NEUMATICO":
@@ -359,11 +364,17 @@ def render_remito_view():
                 with col_neu2:
                     c_ancho, c_perf, c_rod = st.columns(3)
                     with c_ancho:
-                        n_ancho = st.selectbox("Ancho:", ANCHOS_NEUMATICO)
+                        n_ancho = st.selectbox("Ancho:", ANCHOS_NEUMATICO + ["OTRO"])
+                        if n_ancho == "OTRO":
+                            n_ancho = st.text_input("Escriba ancho:").strip()
                     with c_perf:
-                        n_perf = st.selectbox("Perfil:", PERFILES_NEUMATICO)
+                        n_perf = st.selectbox("Perfil:", PERFILES_NEUMATICO + ["OTRO"])
+                        if n_perf == "OTRO":
+                            n_perf = st.text_input("Escriba perfil:").strip()
                     with c_rod:
-                        n_rod = st.selectbox("Rodado:", RODADOS_NEUMATICO)
+                        n_rod = st.selectbox("Rodado:", RODADOS_NEUMATICO + ["OTRO"])
+                        if n_rod == "OTRO":
+                            n_rod = st.text_input("Escriba rodado:").strip()
                     n_modelo = f"{n_ancho}/{n_perf}{n_rod}"
 
             elif cat_sel == "LUBRICANTE":
@@ -391,14 +402,21 @@ def render_remito_view():
             
             n_seriales_str = "-"
             if cat_sel in ["BATERIA", "NEUMATICO"]:
-                st.caption(f"Ingrese los números marcados de cada una de las {n_cant} unidad(es):")
-                n_seriales_str = st.text_input(f"Números Marcados (separados por coma):", placeholder="Ej: 101, 102, 103", key=f"new_seriales_{new_item_key}").strip()
+                st.caption(f"Números marcados opcionales para las {n_cant} unidad(es):")
+                new_serial_list = []
+                for start_idx in range(0, int(n_cant), 5):
+                    serial_cols = st.columns(min(5, int(n_cant) - start_idx))
+                    for offset, serial_col in enumerate(serial_cols):
+                        serial_idx = start_idx + offset
+                        with serial_col:
+                            serial_value = st.text_input(f"Unidad #{serial_idx + 1} (opcional):", key=f"new_serial_{new_item_key}_{serial_idx}").strip()
+                            if serial_value:
+                                new_serial_list.append(serial_value)
+                n_seriales_str = ", ".join(new_serial_list) or "-"
 
             if st.button("✨ Dar de Alta y Agregar al Remito", use_container_width=True):
                 if not n_marca or not n_modelo:
                     st.error("Debe completar los campos.")
-                elif cat_sel in ["BATERIA", "NEUMATICO"] and not n_seriales_str:
-                    st.error("Debe ingresar los números marcados para las baterías o neumáticos.")
                 else:
                     nuevos_seriales = [s.strip().upper() for s in n_seriales_str.split(",") if s.strip() and s.strip() != "-"]
                     existentes = db.numeros_marcados_existentes(cat_sel, nuevos_seriales)
@@ -433,7 +451,8 @@ def render_remito_view():
                         "Nro_Serie_Bateria_Neumatico": n_seriales_str if n_seriales_str else "-"
                     })
                     st.session_state.pop(f"new_qty_{new_item_key}", None)
-                    st.session_state.pop(f"new_seriales_{new_item_key}", None)
+                    for serial_idx in range(5):
+                        st.session_state.pop(f"new_serial_{new_item_key}_{serial_idx}", None)
                     st.success(f"Producto creado: {n_marca} | {n_modelo}")
                     st.rerun()
 

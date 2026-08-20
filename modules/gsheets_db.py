@@ -533,8 +533,6 @@ class DatabaseManager:
     def get_productos(self) -> pd.DataFrame:
         headers = ["ID", "Categoria", "Marca", "Modelo_Detalle", "Codigo_Pieza", "Stock_Actual", "Stock_Minimo", "Unidad", "Requiere_Serial"]
         df = self._sheet_dataframe("STOCK_PRODUCTOS", headers)
-        if df.empty:
-            df = pd.DataFrame(get_initial_products())
 
         if "Stock_Actual" in df.columns:
             df["Stock_Actual"] = pd.to_numeric(df["Stock_Actual"], errors="coerce").fillna(0).astype(int)
@@ -709,19 +707,21 @@ class DatabaseManager:
             if "ENTRADA" in tipo_rem:
                 self.update_stock(it["ID_Producto"], cant, operacion="entrada")
                 if cat in ["BATERIA", "NEUMATICO"]:
-                    for s in seriales:
+                    seriales_validos = [s.strip() for s in seriales if s.strip() and s.strip() != "-"]
+                    while len(seriales_validos) < cant:
+                        seriales_validos.append(f"SIN_MARCAR-{nro_remito}-{len(seriales_validos) + 1}")
+                    for s in seriales_validos[:cant]:
                         s_clean = s.strip()
-                        if s_clean and s_clean != "-":
-                            self.registrar_ingreso_unidad(
-                                numero_marcado=s_clean,
-                                tipo_articulo=cat,
-                                marca=it.get("Marca", ""),
-                                modelo_medida=it.get("Descripcion", ""),
-                                id_producto=it.get("ID_Producto", ""),
-                                nro_remito=nro_remito,
-                                responsable=responsable,
-                                vehiculo_origen=vehiculo
-                            )
+                        self.registrar_ingreso_unidad(
+                            numero_marcado=s_clean,
+                            tipo_articulo=cat,
+                            marca=it.get("Marca", ""),
+                            modelo_medida=it.get("Descripcion", ""),
+                            id_producto=it.get("ID_Producto", ""),
+                            nro_remito=nro_remito,
+                            responsable=responsable,
+                            vehiculo_origen=vehiculo
+                        )
 
             elif "SALIDA" in tipo_rem:
                 self.update_stock(it["ID_Producto"], cant, operacion="salida")

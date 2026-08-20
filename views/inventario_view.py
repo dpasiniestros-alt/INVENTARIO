@@ -34,12 +34,17 @@ def render_inventario_view():
 
     col_f1, col_f2 = st.columns([1.5, 2.5])
     with col_f1:
+        filtro_stock = st.selectbox("Mostrar:", ["TODOS", "CON STOCK", "SIN STOCK"])
         categorias = ["TODAS"] + sorted(df_prod["Categoria"].unique().tolist())
         cat_filtro = st.selectbox("Filtrar por Categoría:", categorias)
     with col_f2:
         query_busqueda = st.text_input("🔍 Buscar por Marca, Modelo, Medida o Código:", placeholder="Ej: Moura, 205/55, PH5949, 12V 75Ah...").strip().lower()
 
     df_mostrar = df_prod.copy()
+    if filtro_stock == "CON STOCK":
+        df_mostrar = df_mostrar[df_mostrar["Stock_Actual"] > 0]
+    elif filtro_stock == "SIN STOCK":
+        df_mostrar = df_mostrar[df_mostrar["Stock_Actual"] == 0]
     if cat_filtro != "TODAS":
         df_mostrar = df_mostrar[df_mostrar["Categoria"] == cat_filtro]
 
