@@ -489,7 +489,7 @@ class DatabaseManager:
 
     def get_ordenes_taller(self, solo_pendientes: bool = False, patente_filtro: str = None) -> pd.DataFrame:
         df = None
-        if self.is_connected_gsheets and self.spreadsheet_vehiculos:
+        if self.is_connected_gsheets and self.spreadsheet_ordenes:
             for sname in ["COORDINACION DE ENVIO A TALLER", "Ordenes_Taller", "Solicitudes_Taller"]:
                 try:
                     sheet = self.spreadsheet_vehiculos.worksheet(sname)

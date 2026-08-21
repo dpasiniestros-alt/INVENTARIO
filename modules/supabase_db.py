@@ -104,9 +104,23 @@ class DatabaseManagerSupabase:
     def add_or_update_producto(self, producto_dict: dict):
         """Agrega o actualiza un producto."""
         def upsert():
-            self.client.table("productos").upsert(producto_dict).execute()
+            producto_sql = {
+                "id": str(producto_dict.get("ID", producto_dict.get("id", ""))),
+                "categoria": str(producto_dict.get("Categoria", producto_dict.get("categoria", ""))),
+                "marca": str(producto_dict.get("Marca", producto_dict.get("marca", ""))),
+                "modelo_detalle": str(producto_dict.get("Modelo_Detalle", producto_dict.get("modelo_detalle", ""))),
+                "codigo_pieza": str(producto_dict.get("Codigo_Pieza", producto_dict.get("codigo_pieza", "-"))),
+                "stock_actual": int(producto_dict.get("Stock_Actual", producto_dict.get("stock_actual", 0))),
+                "stock_minimo": int(producto_dict.get("Stock_Minimo", producto_dict.get("stock_minimo", 0))),
+                "unidad": str(producto_dict.get("Unidad", producto_dict.get("unidad", "UNIDAD"))),
+                "requiere_serial": str(producto_dict.get("Requiere_Serial", producto_dict.get("requiere_serial", "NO"))).upper() in ("SI", "SÍ", "TRUE", "1"),
+            }
+            if not producto_sql["id"]:
+                return False
+            self.client.table("productos").upsert(producto_sql).execute()
+            return True
 
-        self._safe_execute(upsert)
+        return self._safe_execute(upsert, False)
 
     # ===== UNIDADES SERIALIZADAS =====
     def get_unidades_seriales(self) -> list:
@@ -498,32 +512,77 @@ class DatabaseManagerSupabase:
         except Exception:
             return f"{prefix}-{len(filt)+1:04d}"
 
-    def guardar_remito_en_gsheet(self, remito_data: dict, numero_factura: str = "", foto_factura_url: str = "") -> bool:
-        """Compatibilidad: guarda remito en Supabase."""
+    def actualizar_datos_remito(self, remito_data: dict, numero_factura: str = "", foto_factura_url: str = "") -> bool:
+        """Actualiza metadatos de un remito ya guardado en Supabase."""
         def save():
-            self.client.table("remitos").insert({
-                "nro_remito": remito_data.get("Nro_Remito", ""),
-                "fecha": remito_data.get("Fecha", ""),
-                "hora": remito_data.get("Hora", ""),
-                "responsable": remito_data.get("Responsable", ""),
-                "tipo_remito": remito_data.get("Tipo", "").upper(),
-                "articulo_principal": remito_data.get("Articulo_Principal", ""),
-                "marca": remito_data.get("Marca", ""),
-                "modelo": remito_data.get("Modelo", ""),
-                "cantidad": remito_data.get("Cantidad", 0),
-                "gerencia": remito_data.get("Gerencia", ""),
-                "patente": remito_data.get("Patente", ""),
-                "receptor": remito_data.get("Receptor_Nombre", ""),
-                "email_receptor": remito_data.get("Receptor_Email", ""),
+            self.client.table("remitos").update({
                 "numero_factura": numero_factura,
                 "foto_factura": foto_factura_url,
-                "observaciones": remito_data.get("Observaciones", ""),
-                "estado": "Procesado",
-                "fecha_procesamiento": datetime.datetime.now().isoformat(),
+            }).eq("nro_remito", remito_data.get("Nro_Remito", "")).execute()
+            return True
+
+        return self._safe_execute(save, False)
+
+    def guardar_remito_en_gsheet(self, remito_data: dict, numero_factura: str = "", foto_factura_url: str = "") -> bool:
+        """Compatibilidad con el nombre antiguo; nunca escribe en Google Sheets."""
+        return self.actualizar_datos_remito(remito_data, numero_factura, foto_factura_url)
+
+    def registrar_patente_no_catalogada(self, patente: str, gerencia: str = "", receptor: str = "", remito_id: str = "") -> bool:
+        """Registra en Supabase una patente usada que no está en el catálogo de vehículos."""
+        if not patente:
+            return False
+
+        def save():
+            self.client.table("patentes_no_catalogadas").upsert({
+                "patente": patente.strip().upper(),
+                "gerencia": gerencia,
+                "receptor": receptor,
+                "remito_id": remito_id,
             }).execute()
             return True
 
         return self._safe_execute(save, False)
+
+    def mark_remito_email_sent(self, nro_remito: str) -> bool:
+        """Marca en Supabase que el PDF del remito fue enviado por email."""
+        def update():
+            self.client.table("remitos").update({"estado": "Email enviado"}).eq("nro_remito", nro_remito).execute()
+            return True
+
+        return self._safe_execute(update, False)
+
+    def subir_archivo_a_drive(self, archivo_bytes, nombre_archivo: str, carpeta_id: str = None) -> str:
+        """Sube evidencias a Google Drive sin escribir datos en Google Sheets."""
+        try:
+            from io import BytesIO
+            from google.oauth2.service_account import Credentials
+            from googleapiclient.discovery import build
+            from googleapiclient.http import MediaIoBaseUpload
+
+            if "gcp_service_account" not in st.secrets:
+                return ""
+            creds = Credentials.from_service_account_info(
+                dict(st.secrets["gcp_service_account"]),
+                scopes=["https://www.googleapis.com/auth/drive"],
+            )
+            drive_service = build("drive", "v3", credentials=creds)
+            metadata = {"name": nombre_archivo}
+            if carpeta_id:
+                metadata["parents"] = [carpeta_id]
+            media = MediaIoBaseUpload(BytesIO(archivo_bytes), mimetype="application/octet-stream", resumable=True)
+            archivo = drive_service.files().create(
+                body=metadata, media_body=media, fields="id"
+            ).execute()
+            try:
+                drive_service.permissions().create(
+                    fileId=archivo["id"], body={"type": "anyone", "role": "reader"}
+                ).execute()
+            except Exception:
+                pass
+            return f"https://drive.google.com/file/d/{archivo['id']}/view"
+        except Exception as exc:
+            print(f"Error subiendo archivo a Drive: {exc}")
+            return ""
 
     # ===== RESPONSABLES =====
     def get_responsables(self) -> pd.DataFrame:

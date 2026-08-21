@@ -439,7 +439,7 @@ def render_remito_view():
                         "Requiere_Serial": "SI" if cat_sel in ["BATERIA", "NEUMATICO"] else "NO"
                     }
                     if not db.add_or_update_producto(prod_dict_new):
-                        st.error("No se pudo guardar el producto en Google Sheets. El artículo no fue agregado al remito.")
+                        st.error("No se pudo guardar el producto en la base de datos. El artículo no fue agregado al remito.")
                         st.stop()
                     st.session_state["cart_items"].append({
                         "ID_Producto": new_id,
@@ -653,8 +653,8 @@ def render_remito_view():
                         )
                         st.info(f"⚠️ Patente {patente_final} no catalogada. Se agregó a la lista de PATENTES_NO_CATALOGADAS para revisión.")
                 
-                # Guardar también en BASE_DATOS_REMITOS
-                db.guardar_remito_en_gsheet(
+                # Completar en SQL los datos de factura que se obtuvieron después de guardar el remito.
+                db.actualizar_datos_remito(
                     remito_header,
                     numero_factura=numero_factura if es_entrada else "",
                     foto_factura_url=foto_factura_url_final if es_entrada else ""
