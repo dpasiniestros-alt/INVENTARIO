@@ -106,6 +106,31 @@ def render_admin_view():
         df_resp = db.get_responsables()
         st.dataframe(df_resp, use_container_width=True, hide_index=True)
 
+        st.markdown("#### Administradores habilitados")
+        administradores = db.get_administradores()
+        admin_names = set(administradores["nombre"].astype(str)) if not administradores.empty else set()
+        for nombre_admin in sorted(admin_names):
+            col_admin, col_remove = st.columns([3, 1])
+            col_admin.write(nombre_admin)
+            if col_remove.button("Quitar", key=f"quitar_admin_{nombre_admin}", disabled=len(admin_names) <= 1):
+                if db.quitar_administrador(nombre_admin, str(st.session_state.get("current_user", ""))):
+                    st.success(f"{nombre_admin} ya no puede entrar a administración.")
+                    st.rerun()
+
+        candidatos_admin = [
+            nombre for nombre in df_resp["nombre"].astype(str).tolist()
+            if nombre not in admin_names
+        ] if not df_resp.empty else []
+        if candidatos_admin:
+            with st.form("form_add_admin"):
+                nuevo_admin = st.selectbox("Responsable que podrá administrar:", candidatos_admin)
+                if st.form_submit_button("Habilitar administrador", use_container_width=True):
+                    if db.agregar_administrador(nuevo_admin, str(st.session_state.get("current_user", ""))):
+                        st.success(f"{nuevo_admin} habilitado para administración.")
+                        st.rerun()
+        else:
+            st.caption("Todos los responsables ya tienen acceso administrativo.")
+
         with st.form("form_new_resp"):
             st.markdown("#### ➕ Registrar Nuevo Responsable:")
             n_resp_nom = st.text_input("Apellido y Nombre:")
@@ -115,6 +140,19 @@ def render_admin_view():
                     db.add_responsable(n_resp_nom, n_resp_pin)
                     st.success(f"Responsable {n_resp_nom} habilitado.")
                     st.rerun()
+
+        responsables_eliminables = [
+            nombre for nombre in df_resp["nombre"].astype(str).tolist()
+            if nombre not in admin_names
+        ] if not df_resp.empty else []
+        if responsables_eliminables:
+            with st.form("form_delete_resp"):
+                responsable_baja = st.selectbox("Responsable que dejó la empresa:", responsables_eliminables)
+                if st.form_submit_button("Eliminar responsable", use_container_width=True):
+                    if db.eliminar_responsable(responsable_baja, str(st.session_state.get("current_user", ""))):
+                        st.success(f"{responsable_baja} eliminado del acceso a la aplicación.")
+                        st.rerun()
+                    st.error("No se puede eliminar un administrador. Quite primero su permiso administrativo.")
 
     with tab4:
         st.markdown("### 📦 Ajuste Manual de Inventario")

@@ -64,6 +64,46 @@ class DatabaseManagerSupabase:
             return defaults
         return self._safe_execute(fetch, defaults)
 
+    def get_administradores(self) -> pd.DataFrame:
+        """Obtiene los responsables habilitados para entrar a administración."""
+        def fetch():
+            response = self.client.table("administradores").select("nombre").order("nombre").execute()
+            return pd.DataFrame(response.data or [], columns=["nombre"])
+
+        administradores = self._safe_execute(fetch, pd.DataFrame(columns=["nombre"]))
+        if administradores.empty:
+            responsables = self.get_responsables()
+            if not responsables.empty:
+                primer_admin = str(responsables.iloc[0]["nombre"])
+                try:
+                    self.client.table("administradores").upsert({"nombre": primer_admin}).execute()
+                    administradores = pd.DataFrame([{"nombre": primer_admin}])
+                except Exception as exc:
+                    self.last_error = str(exc)
+                    print(f"Error inicializando administradores en Supabase: {exc}")
+        return administradores
+
+    def es_administrador(self, nombre: str) -> bool:
+        administradores = self.get_administradores()
+        return bool(not administradores.empty and nombre in administradores["nombre"].astype(str).tolist())
+
+    def agregar_administrador(self, nombre: str, usuario: str = "") -> bool:
+        def insert():
+            self.client.table("administradores").upsert({"nombre": nombre}).execute()
+            self.registrar_auditoria(usuario, "ALTA_ADMINISTRADOR", "administrador", nombre)
+            return True
+        return self._safe_execute(insert, False)
+
+    def quitar_administrador(self, nombre: str, usuario: str = "") -> bool:
+        def delete():
+            administradores = self.get_administradores()
+            if len(administradores) <= 1:
+                return False
+            self.client.table("administradores").delete().eq("nombre", nombre).execute()
+            self.registrar_auditoria(usuario, "BAJA_ADMINISTRADOR", "administrador", nombre)
+            return True
+        return self._safe_execute(delete, False)
+
     def save_email_config(self, config: dict, usuario: str = "") -> bool:
         def save():
             self.client.table("configuracion_app").upsert({"clave": "email_template", "valor": config}).execute()
@@ -855,6 +895,15 @@ class DatabaseManagerSupabase:
                 self.registrar_auditoria(nombre, "ALTA_RESPONSABLE", "responsable", nombre)
 
         self._safe_execute(insert)
+
+    def eliminar_responsable(self, nombre: str, usuario: str = "") -> bool:
+        def delete():
+            if self.es_administrador(nombre):
+                return False
+            self.client.table("responsables").delete().eq("nombre", nombre).execute()
+            self.registrar_auditoria(usuario, "BAJA_RESPONSABLE", "responsable", nombre)
+            return True
+        return self._safe_execute(delete, False)
 
     # ===== RECEPTORES =====
     def get_receptores(self) -> pd.DataFrame:

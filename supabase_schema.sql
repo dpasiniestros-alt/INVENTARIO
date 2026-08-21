@@ -33,6 +33,11 @@ create table if not exists public.responsables (
     pin text not null default '1234'
 );
 
+create table if not exists public.administradores (
+    nombre text primary key references public.responsables(nombre) on delete cascade,
+    agregado_en timestamptz not null default now()
+);
+
 create table if not exists public.receptores (
     nombre text primary key,
     email text not null default '',
