@@ -17,6 +17,8 @@ def render_inventario_view():
         st.warning("No hay productos cargados en el inventario.")
         return
 
+    df_prod = df_prod.loc[:, ~df_prod.columns.duplicated(keep="first")].copy()
+
     df_prod["Stock_Actual"] = pd.to_numeric(df_prod["Stock_Actual"], errors="coerce").fillna(0)
     df_prod["Stock_Minimo"] = pd.to_numeric(df_prod["Stock_Minimo"], errors="coerce").fillna(0)
     total_articulos = len(df_prod)
@@ -66,7 +68,8 @@ def render_inventario_view():
         else:
             return "🟢 NORMAL"
 
-    df_mostrar["Estado"] = df_mostrar.apply(get_estado_badge, axis=1)
+    df_mostrar = df_mostrar.loc[:, ~df_mostrar.columns.duplicated(keep="first")].copy()
+    df_mostrar["Estado"] = [get_estado_badge(row) for _, row in df_mostrar.iterrows()]
 
     cols_order = ["Estado", "Categoria", "Marca", "Modelo_Detalle", "Codigo_Pieza", "Stock_Actual", "Unidad", "Stock_Minimo"]
     cols_existentes = [c for c in cols_order if c in df_mostrar.columns]
