@@ -60,6 +60,10 @@ La aplicación se abrirá automáticamente en tu navegador web (por defecto http
 
 ## 🔐 Configuración de Secrets (Google Sheets & Correo Electrónico)
 
+La migración hacia Supabase está preparada en `supabase_schema.sql`. Antes de activar
+la nueva base online, ejecuta ese archivo en el SQL Editor de Supabase y configura los
+Secrets indicados en `SUPABASE_SETUP.md`.
+
 En Streamlit Cloud, entra a tu App, ve a **Settings > Secrets**, y pega la configuración:
 
 `	oml

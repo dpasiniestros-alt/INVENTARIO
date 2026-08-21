@@ -1043,4 +1043,16 @@ class DatabaseManager:
 
 @st.cache_resource(show_spinner=False)
 def get_db():
-    return DatabaseManager()
+    """Retorna DatabaseManager usando Supabase como backend (SIN fallback a Google Sheets)."""
+    from modules.supabase_client import supabase_configured
+    
+    if not supabase_configured():
+        raise RuntimeError(
+            "⚠️ Supabase no está configurado. Verifica los Secrets en Streamlit Cloud:\n"
+            "- SUPABASE_URL\n"
+            "- SUPABASE_SERVICE_ROLE_KEY\n\n"
+            "Si esto persiste, llama al técnico."
+        )
+    
+    from modules.supabase_db import DatabaseManagerSupabase
+    return DatabaseManagerSupabase()
