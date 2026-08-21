@@ -5,12 +5,19 @@ from __future__ import annotations
 import datetime
 import json
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import pandas as pd
 import streamlit as st
 
 from modules.catalog_seed import get_initial_products
 from modules.supabase_client import get_supabase_client, supabase_configured
+
+APP_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
+
+
+def now_local() -> datetime.datetime:
+    return datetime.datetime.now(APP_TIMEZONE)
 
 
 class DatabaseManagerSupabase:
@@ -28,6 +35,20 @@ class DatabaseManagerSupabase:
         except Exception as exc:
             print(f"Error en Supabase: {exc}")
             return default
+
+    def registrar_auditoria(self, usuario: str, accion: str, entidad: str, entidad_id: str = "", detalle: dict = None) -> bool:
+        """Registra quién realizó una operación y qué entidad afectó."""
+        def insert():
+            self.client.table("auditoria").insert({
+                "usuario": usuario or "",
+                "accion": accion,
+                "entidad": entidad,
+                "entidad_id": entidad_id or "",
+                "detalle": detalle or {},
+            }).execute()
+            return True
+
+        return self._safe_execute(insert, False)
 
     # ===== PRODUCTOS =====
     def get_productos(self) -> pd.DataFrame:
@@ -118,6 +139,13 @@ class DatabaseManagerSupabase:
             if not producto_sql["id"]:
                 return False
             self.client.table("productos").upsert(producto_sql).execute()
+            self.registrar_auditoria(
+                str(st.session_state.get("current_user", "")),
+                "ALTA_O_MODIFICACION_PRODUCTO",
+                "producto",
+                producto_sql["id"],
+                {"categoria": producto_sql["categoria"], "modelo": producto_sql["modelo_detalle"]},
+            )
             return True
 
         return self._safe_execute(upsert, False)
@@ -180,10 +208,14 @@ class DatabaseManagerSupabase:
         units = self.get_unidades_seriales()
         res = []
         p_clean = patente.strip().upper()
+        if "[" in p_clean and "]" in p_clean:
+            p_clean = p_clean.split("[")[1].split("]")[0].strip()
         for u in units:
             if u.get("Estado") == "EN VEHICULO":
                 v_act = str(u.get("Vehiculo_Actual", "")).upper()
-                if p_clean in v_act:
+                if "[" in v_act and "]" in v_act:
+                    v_act = v_act.split("[")[1].split("]")[0].strip()
+                if p_clean == v_act:
                     res.append(u)
         return res
 
@@ -194,7 +226,7 @@ class DatabaseManagerSupabase:
             return
 
         units = self.get_unidades_seriales()
-        fecha_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        fecha_now = now_local().strftime("%Y-%m-%d %H:%M")
 
         found = False
         for u in units:
@@ -239,7 +271,7 @@ class DatabaseManagerSupabase:
         """Registra la salida de una unidad hacia un vehículo."""
         numero_marcado = str(numero_marcado).strip()
         units = self.get_unidades_seriales()
-        fecha_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        fecha_now = now_local().strftime("%Y-%m-%d %H:%M")
 
         for u in units:
             if str(u.get("Numero_Marcado")).strip().lower() == numero_marcado.lower() and u.get("Tipo_Articulo") == tipo_articulo:
@@ -264,7 +296,7 @@ class DatabaseManagerSupabase:
         """Registra el traspaso de una unidad entre vehículos."""
         numero_marcado = str(numero_marcado).strip()
         units = self.get_unidades_seriales()
-        fecha_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+        fecha_now = now_local().strftime("%Y-%m-%d %H:%M")
 
         for u in units:
             if str(u.get("Numero_Marcado")).strip().lower() == numero_marcado.lower() and u.get("Tipo_Articulo") == tipo_articulo:
@@ -284,6 +316,102 @@ class DatabaseManagerSupabase:
                 break
 
         self.save_unidades_seriales(units)
+
+    def registrar_movimiento_unidad(self, unidad: dict, numero_anterior: str, estado_nuevo: str, vehiculo_nuevo: str, responsable: str, motivo: str = "") -> dict | None:
+        """Emite comprobante y actualiza una unidad editada manualmente."""
+        def save():
+            numero_nuevo = str(unidad.get("Numero_Marcado", "")).strip()
+            estado_anterior = str(unidad.get("Estado", "EN STOCK"))
+            vehiculo_anterior = str(unidad.get("Vehiculo_Actual", ""))
+            if not numero_nuevo or not unidad.get("id"):
+                return None
+
+            if estado_nuevo == "BAJA / SCRAP":
+                tipo = "BAJA"
+            elif estado_nuevo == "EN VEHICULO" and estado_anterior == "EN VEHICULO":
+                tipo = "TRASPASO"
+            elif estado_nuevo == "EN VEHICULO":
+                tipo = "SALIDA"
+            else:
+                tipo = "ENTRADA"
+
+            nro_remito = self.get_proximo_numero_remito(tipo)
+            fecha_hora = now_local().strftime("%Y-%m-%d %H:%M")
+            detalle = motivo or f"Movimiento manual de unidad {numero_anterior} a {numero_nuevo}"
+            header = {
+                "Nro_Remito": nro_remito,
+                "Tipo": tipo,
+                "Fecha_Hora": fecha_hora,
+                "Responsable_Entrega": responsable,
+                "Receptor_Nombre": responsable,
+                "Receptor_Email": "",
+                "Gerencia": "TALLER",
+                "Patente": vehiculo_nuevo,
+                "Vehiculo_Origen": vehiculo_anterior,
+                "Articulo_Principal": unidad.get("Tipo_Articulo", ""),
+                "Marca": unidad.get("Marca", ""),
+                "Modelo": unidad.get("Modelo_Medida", ""),
+                "Cantidad": 1,
+                "Observaciones": detalle,
+            }
+            item = {
+                "Nro_Remito": nro_remito,
+                "ID_Producto": unidad.get("ID_Producto", ""),
+                "Categoria": unidad.get("Tipo_Articulo", ""),
+                "Marca": unidad.get("Marca", ""),
+                "Descripcion": unidad.get("Modelo_Medida", ""),
+                "Codigo_Pieza": "-",
+                "Cantidad": 1,
+                "Nro_Serie_Bateria_Neumatico": numero_nuevo,
+            }
+            self.client.table("remitos").insert({
+                "nro_remito": nro_remito,
+                "fecha": now_local().date().isoformat(),
+                "hora": now_local().strftime("%H:%M:%S"),
+                "responsable": responsable,
+                "tipo_remito": tipo,
+                "articulo_principal": header["Articulo_Principal"],
+                "marca": header["Marca"],
+                "modelo": header["Modelo"],
+                "cantidad": 1,
+                "gerencia": header["Gerencia"],
+                "patente": vehiculo_nuevo,
+                "receptor": responsable,
+                "observaciones": detalle,
+            }).execute()
+            self.client.table("remito_items").insert({
+                "nro_remito": nro_remito,
+                "id_producto": item["ID_Producto"],
+                "categoria": item["Categoria"],
+                "marca": item["Marca"],
+                "descripcion": item["Descripcion"],
+                "codigo_pieza": "-",
+                "cantidad": 1,
+                "numeros_seriales": numero_nuevo,
+            }).execute()
+            historial = list(unidad.get("Historial", []))
+            historial.append({
+                "Fecha": fecha_hora,
+                "Tipo": f"MOVIMIENTO / {tipo}",
+                "Nro_Remito": nro_remito,
+                "Responsable": responsable,
+                "Vehiculo_Anterior": vehiculo_anterior,
+                "Vehiculo_Nuevo": vehiculo_nuevo,
+                "Numero_Anterior": numero_anterior,
+                "Numero_Nuevo": numero_nuevo,
+                "Detalle": detalle,
+            })
+            self.client.table("unidades_serializadas").update({
+                "numero_marcado": numero_nuevo,
+                "estado": "BAJA" if estado_nuevo == "BAJA / SCRAP" else estado_nuevo,
+                "vehiculo_actual": vehiculo_nuevo,
+                "fecha_ultimo_movimiento": now_local().isoformat(),
+                "historial": historial,
+            }).eq("id", unidad["id"]).execute()
+            self.registrar_auditoria(responsable, "MOVIMIENTO_UNIDAD", "unidad", numero_nuevo, {"remito": nro_remito, "tipo": tipo})
+            return {"header": header, "items": [item], "nro_remito": nro_remito}
+
+        return self._safe_execute(save, None)
 
     def buscar_historial_unidad(self, numero_marcado: str) -> dict:
         """Busca el historial completo de una unidad por número marcado."""
@@ -320,7 +448,17 @@ class DatabaseManagerSupabase:
                     'responsable': 'Responsable_Entrega',
                     'receptor': 'Receptor_Nombre',
                     'email_receptor': 'Receptor_Email',
+                    'fecha': 'Fecha',
+                    'hora': 'Hora',
+                    'gerencia': 'Gerencia',
+                    'patente': 'Patente',
+                    'numero_factura': 'Numero_Factura',
+                    'foto_factura': 'Foto_Factura',
+                    'observaciones': 'Observaciones',
+                    'estado': 'Estado',
                 })
+                df["Fecha_Hora"] = df.get("Fecha", "").astype(str) + " " + df.get("Hora", "").astype(str)
+                df["Enviado_Email"] = df.get("Estado", "").astype(str).eq("Email enviado").map({True: "SI", False: "NO"})
                 return df
             return pd.DataFrame()
 
@@ -335,7 +473,16 @@ class DatabaseManagerSupabase:
                 response = self.client.table("remito_items").select("*").execute()
             
             if response.data:
-                return pd.DataFrame(response.data)
+                return pd.DataFrame(response.data).rename(columns={
+                    "nro_remito": "Nro_Remito",
+                    "id_producto": "ID_Producto",
+                    "categoria": "Categoria",
+                    "marca": "Marca",
+                    "descripcion": "Descripcion",
+                    "codigo_pieza": "Codigo_Pieza",
+                    "cantidad": "Cantidad",
+                    "numeros_seriales": "Nro_Serie_Bateria_Neumatico",
+                })
             return pd.DataFrame()
 
         return self._safe_execute(fetch, pd.DataFrame())
@@ -348,8 +495,8 @@ class DatabaseManagerSupabase:
             # Inserta remito
             self.client.table("remitos").insert({
                 "nro_remito": nro_remito,
-                "fecha": remito_header.get("Fecha", datetime.date.today().isoformat()),
-                "hora": remito_header.get("Hora", datetime.datetime.now().strftime("%H:%M:%S")),
+                "fecha": remito_header.get("Fecha", now_local().date().isoformat()),
+                "hora": remito_header.get("Hora", now_local().strftime("%H:%M:%S")),
                 "responsable": remito_header.get("Responsable_Entrega", ""),
                 "tipo_remito": remito_header.get("Tipo", "SALIDA"),
                 "articulo_principal": remito_header.get("Articulo_Principal", ""),
@@ -448,6 +595,14 @@ class DatabaseManagerSupabase:
                     remito_header.get("Gerencia", "")
                 )
 
+            self.registrar_auditoria(
+                responsable,
+                "EMITIR_REMITO",
+                "remito",
+                nro_remito,
+                {"tipo": tipo_rem, "items": len(items)},
+            )
+
             return True
 
         return self._safe_execute(save, False)
@@ -494,6 +649,8 @@ class DatabaseManagerSupabase:
             prefix = "REM-E"
         elif "TRASPASO" in t_clean:
             prefix = "REM-T"
+        elif "BAJA" in t_clean:
+            prefix = "REM-B"
         else:
             prefix = "REM-S"
 
@@ -607,6 +764,7 @@ class DatabaseManagerSupabase:
             df = self.get_responsables()
             if nombre not in df["nombre"].values:
                 self.client.table("responsables").insert({"nombre": nombre, "pin": pin}).execute()
+                self.registrar_auditoria(nombre, "ALTA_RESPONSABLE", "responsable", nombre)
 
         self._safe_execute(insert)
 
@@ -645,6 +803,13 @@ class DatabaseManagerSupabase:
                 "email": email,
                 "gerencia": gerencia,
             }).execute()
+            self.registrar_auditoria(
+                str(st.session_state.get("current_user", "")),
+                "ALTA_O_MODIFICACION_RECEPTOR",
+                "receptor",
+                nombre,
+                {"email": email, "gerencia": gerencia},
+            )
 
         self._safe_execute(upsert)
 

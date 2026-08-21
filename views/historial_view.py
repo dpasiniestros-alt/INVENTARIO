@@ -24,7 +24,7 @@ def render_historial_view():
 
     c_f1, c_f2, c_f3 = st.columns([1, 1, 2])
     with c_f1:
-        filtro_tipo = st.selectbox("Filtrar por Tipo:", ["TODOS", "SALIDA", "ENTRADA"])
+        filtro_tipo = st.selectbox("Filtrar por Tipo:", ["TODOS", "SALIDA", "ENTRADA", "TRASPASO", "BAJA"])
     with c_f2:
         gerencias = ["TODAS"] + sorted(df_remitos["Gerencia"].dropna().unique().tolist()) if "Gerencia" in df_remitos.columns else ["TODAS"]
         filtro_ger = st.selectbox("Filtrar por Gerencia:", gerencias)
@@ -54,7 +54,8 @@ def render_historial_view():
         receptor = rem.get("Receptor_Nombre", "-")
         patente = rem.get("Patente", "-")
         ot = rem.get("Nro_Orden_Taller", "-")
-        badge = "📤 SALIDA" if tipo.upper() == "SALIDA" else "📥 ENTRADA"
+        tipo_upper = str(tipo).upper()
+        badge = "📤 SALIDA" if tipo_upper == "SALIDA" else ("📥 ENTRADA" if tipo_upper == "ENTRADA" else ("🔄 TRASPASO" if tipo_upper == "TRASPASO" else "🗑️ BAJA"))
         
         ot_txt = f" | OT: {ot}" if ot and str(ot) != "-" and str(ot) != "" else ""
         pat_txt = f" | Patente: {patente}" if patente and str(patente) != "-" and str(patente) != "" else ""

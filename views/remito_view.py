@@ -15,6 +15,16 @@ from modules.catalog_seed import (
 )
 from modules.pdf_generator import generate_remito_pdf, get_pdf_bytes
 from modules.email_sender import send_remito_email
+from modules.supabase_db import now_local
+
+
+def _reset_remito_form():
+    st.session_state["cart_items"] = []
+    st.session_state["remito_exitoso"] = None
+    for key in list(st.session_state):
+        if key.startswith(("qty_", "new_qty_", "new_serial_", "in_num_", "mail_in_")):
+            del st.session_state[key]
+    st.session_state.pop("canvas_firma", None)
 
 def render_remito_view():
     db = get_db()
@@ -40,8 +50,7 @@ def render_remito_view():
             )
         with col_d2:
             if st.button("📝 Nuevo Remito", use_container_width=True):
-                st.session_state["remito_exitoso"] = None
-                st.session_state["cart_items"] = []
+                _reset_remito_form()
                 st.rerun()
 
         if res.get("email_status"):
@@ -93,22 +102,8 @@ def render_remito_view():
     lista_veh_etiquetas = sorted(df_veh["ETIQUETA_COMPLETA"].dropna().unique().tolist()) if not df_veh.empty else []
 
     # 2. RESPONSABLE DE TALLER
-    st.markdown("#### 👤 1. Responsable del Taller")
-    df_resp = db.get_responsables()
-    lista_resp = df_resp["nombre"].tolist() if not df_resp.empty else []
-    lista_resp.append("+ Agregar nuevo responsable...")
-    
-    label_resp = "Responsable que autoriza / entrega:" if not es_entrada else "Responsable que recibe el ingreso en taller:"
-    sel_resp = st.selectbox(label_resp, lista_resp)
-    if sel_resp == "+ Agregar nuevo responsable...":
-        nuevo_resp = st.text_input("Nombre y Apellido del nuevo responsable:").strip()
-        if nuevo_resp:
-            db.add_responsable(nuevo_resp)
-            responsable_final = nuevo_resp
-        else:
-            responsable_final = ""
-    else:
-        responsable_final = sel_resp
+    responsable_final = str(st.session_state.get("current_user", "")).strip()
+    st.markdown(f"#### 👤 1. Responsable del Taller: **{responsable_final or 'Sesión no identificada'}**")
 
     # 3. DATOS DE DESTINATARIO Y VEHICULOS SEGUN OPERACION
     veh_origen_final = ""
@@ -223,6 +218,12 @@ def render_remito_view():
         cat_sel = st.selectbox("Categoría de Artículo:", categorias_disponibles)
         
         df_cat = df_prod[df_prod["Categoria"] == cat_sel]
+        unidades_origen = db.get_unidades_en_vehiculo(veh_origen_final) if es_traspaso and veh_origen_final else []
+        if es_traspaso and unidades_origen:
+            ids_origen = {str(unit.get("ID_Producto", "")) for unit in unidades_origen}
+            df_cat_origen = df_cat[df_cat["ID"].astype(str).isin(ids_origen)]
+            if not df_cat_origen.empty:
+                df_cat = df_cat_origen
         if es_salida:
             df_cat = df_cat[df_cat["Stock_Actual"] > 0]
 
@@ -244,8 +245,12 @@ def render_remito_view():
                     opciones_prod.append(lbl)
                     prod_dict[lbl] = p
 
+                if not opciones_prod:
+                    st.warning("No hay artículos de esta categoría asignados al vehículo de origen.")
+                    return
                 prod_sel_lbl = st.selectbox("Seleccione Producto:", opciones_prod)
                 p_selected = prod_dict.get(prod_sel_lbl)
+                item_key = str(p_selected.get("ID", cat_sel)).replace(" ", "_")
 
                 if cat_sel in ["BATERIA", "NEUMATICO"]:
                     st.markdown(f"##### 🏷️ Trazabilidad: Números Marcados de {cat_sel}")
@@ -268,9 +273,14 @@ def render_remito_view():
                             seriales_str = st.text_input(f"Números Marcados de las {cant} unidad(es) (separados por coma):", placeholder="Ej: 1, 32, 52").strip()
 
                     elif es_traspaso:
-                        st.info("Ingrese el número marcado de la unidad que está traspasando de vehículo:")
+                        st.info("Ingrese un número marcado asignado al vehículo de origen:")
                         cant = 1
-                        seriales_str = st.text_input("Número Marcado de la unidad:", placeholder="Ej: 32").strip()
+                        seriales_sugeridos = [str(unit.get("Numero_Marcado", "")) for unit in unidades_origen]
+                        seriales_str = st.text_input(
+                            "Número Marcado de la unidad:",
+                            value=seriales_sugeridos[0] if len(seriales_sugeridos) == 1 else "",
+                            placeholder="Ej: 32",
+                        ).strip()
 
                     else:
                         # ENTRADA
@@ -300,6 +310,21 @@ def render_remito_view():
                         seriales_str = "-"
 
                 if st.button("📥 Agregar al Carrito", use_container_width=True):
+                    if es_traspaso:
+                        numero_traspaso = str(seriales_str).strip()
+                        unidad_traspaso = db.buscar_historial_unidad(numero_traspaso) if numero_traspaso else None
+                        vehiculo_unidad = str(unidad_traspaso.get("Vehiculo_Actual", "")) if unidad_traspaso else ""
+                        if not unidad_traspaso:
+                            st.error(f"No existe una unidad con número marcado {numero_traspaso or '(vacío)'}.")
+                            st.stop()
+                        if str(unidad_traspaso.get("Tipo_Articulo", "")).upper() != cat_sel.upper() or str(unidad_traspaso.get("ID_Producto", "")) != str(p_selected.get("ID", "")):
+                            st.error("El número marcado no corresponde al modelo exacto seleccionado.")
+                            st.stop()
+                        origen_patente = veh_origen_final.split("[")[1].split("]")[0].strip().upper() if "[" in veh_origen_final and "]" in veh_origen_final else veh_origen_final.strip().upper()
+                        unidad_patente = vehiculo_unidad.split("[")[1].split("]")[0].strip().upper() if "[" in vehiculo_unidad and "]" in vehiculo_unidad else vehiculo_unidad.strip().upper()
+                        if unidad_patente != origen_patente:
+                            st.error(f"La batería/neumático {numero_traspaso} está asignado a otro vehículo. No se puede traspasar desde {veh_origen_final}.")
+                            st.stop()
                     if cat_sel in ["BATERIA", "NEUMATICO"] or seriales_str == "-":
                         nuevos_seriales = [s.strip().upper() for s in str(seriales_str).split(",") if s.strip() and s.strip() != "-"]
                         usados = []
@@ -560,7 +585,7 @@ def render_remito_view():
                     signature_img = None
 
             nro_remito = db.get_proximo_numero_remito(tipo_str)
-            fecha_hora_now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+            fecha_hora_now = now_local().strftime("%Y-%m-%d %H:%M")
 
             remito_header = {
                 "Nro_Remito": nro_remito,
@@ -612,7 +637,9 @@ def render_remito_view():
                         st.warning(f"No se pudo leer la foto {foto.name}.")
                 pdf_path = generate_remito_pdf(remito_header, items_to_save, signature_img, evidencia_images)
                 remito_header["Link_PDF"] = pdf_path
-                db.guardar_remito(remito_header, items_to_save)
+                if not db.guardar_remito(remito_header, items_to_save):
+                    st.error("No se pudo guardar el remito en la base de datos. No se aplicó el movimiento.")
+                    return
                 
                 # Subir foto de factura a Google Drive (si existe)
                 foto_factura_url_final = ""
@@ -661,7 +688,7 @@ def render_remito_view():
                 )
 
                 email_status_msg = ""
-                if es_salida and receptor_email and "@" in receptor_email:
+                if (es_salida or es_traspaso) and receptor_email and "@" in receptor_email:
                     ok_mail, msg_mail = send_remito_email(receptor_email, receptor_nombre, nro_remito, pdf_path, tipo_remito=tipo_str)
                     if ok_mail:
                         db.mark_remito_email_sent(nro_remito)
@@ -679,5 +706,5 @@ def render_remito_view():
 
     with col_btn2:
         if st.button("Limpiar Formulario", use_container_width=True):
-            st.session_state["cart_items"] = []
+            _reset_remito_form()
             st.rerun()

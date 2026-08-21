@@ -489,16 +489,20 @@ class DatabaseManager:
 
     def get_ordenes_taller(self, solo_pendientes: bool = False, patente_filtro: str = None) -> pd.DataFrame:
         df = None
-        if self.is_connected_gsheets and self.spreadsheet_ordenes:
-            for sname in ["COORDINACION DE ENVIO A TALLER", "Ordenes_Taller", "Solicitudes_Taller"]:
-                try:
-                    sheet = self.spreadsheet_vehiculos.worksheet(sname)
-                    data = sheet.get_all_records()
-                    if data:
-                        df = pd.DataFrame(data)
-                        break
-                except Exception:
-                    pass
+        spreadsheets = [sheet for sheet in [self.spreadsheet_ordenes, self.spreadsheet_vehiculos] if sheet]
+        if self.is_connected_gsheets and spreadsheets:
+            for spreadsheet in spreadsheets:
+                for sname in ["COORDINACION DE ENVIO A TALLER", "Ordenes_Taller", "Solicitudes_Taller"]:
+                    try:
+                        sheet = spreadsheet.worksheet(sname)
+                        data = sheet.get_all_records()
+                        if data:
+                            df = pd.DataFrame(data)
+                            break
+                    except Exception:
+                        pass
+                if df is not None:
+                    break
 
         if df is None:
             df = pd.DataFrame()
@@ -525,7 +529,8 @@ class DatabaseManager:
                 df[req] = ""
 
         if solo_pendientes and "Estado" in df.columns:
-            df = df[~df["Estado"].astype(str).str.upper().isin(["COMPLETADA", "FINALIZADA", "CERRADA"])]
+            estados_cerrados = ["COMPLETADA", "FINALIZADA", "CERRADA", "CANCELADA", "RECHAZADA"]
+            df = df[~df["Estado"].astype(str).str.upper().isin(estados_cerrados)]
 
         if patente_filtro and not df.empty:
             p_clean = patente_filtro.strip().upper()

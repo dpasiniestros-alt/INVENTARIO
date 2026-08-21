@@ -6,11 +6,30 @@ Vista de Trazabilidad y Seguimiento Individual de Baterias y Neumaticos.
 import streamlit as st
 import pandas as pd
 from modules.gsheets_db import get_db
+from modules.pdf_generator import generate_remito_pdf, get_pdf_bytes
+from modules.email_sender import send_remito_email
 
 def render_trazabilidad_view():
     db = get_db()
     st.markdown("## 🔍 Trazabilidad de Baterías y Neumáticos")
     st.caption("Seguimiento individual por número marcado: historial de vehículos, fechas y movimientos")
+
+    if st.session_state.get("trazabilidad_exitoso"):
+        resultado = st.session_state["trazabilidad_exitoso"]
+        st.success(f"Movimiento registrado con el remito {resultado['nro_remito']}.")
+        st.download_button(
+            "📥 Descargar comprobante",
+            data=get_pdf_bytes(resultado["pdf_path"]),
+            file_name=f"{resultado['nro_remito']}.pdf",
+            mime="application/pdf",
+            key=f"descarga_mov_{resultado['nro_remito']}",
+        )
+        if resultado.get("email_status"):
+            st.info(resultado["email_status"])
+        if st.button("Continuar", key="continuar_trazabilidad"):
+            st.session_state.pop("trazabilidad_exitoso", None)
+            st.rerun()
+        return
 
     tab_buscar, tab_general, tab_editar = st.tabs([
         "🔎 Consultar por Número",
@@ -75,6 +94,19 @@ def render_trazabilidad_view():
                             st.markdown(f"> {detalle}")
                             if h.get("Receptor"):
                                 st.caption(f"Receptor: {h.get('Receptor')} | Responsable Taller: {h.get('Responsable', '-')}")
+                            if rem:
+                                remitos = db.get_remitos()
+                                remito_row = remitos[remitos["Nro_Remito"].astype(str) == str(rem)] if not remitos.empty and "Nro_Remito" in remitos.columns else pd.DataFrame()
+                                items_remito = db.get_remito_items(str(rem))
+                                if not remito_row.empty:
+                                    pdf_path = generate_remito_pdf(remito_row.iloc[0].to_dict(), items_remito.to_dict(orient="records"))
+                                    st.download_button(
+                                        "📥 Descargar remito",
+                                        data=get_pdf_bytes(pdf_path),
+                                        file_name=f"{rem}.pdf",
+                                        mime="application/pdf",
+                                        key=f"descargar_traza_{rem}_{i}",
+                                    )
                             st.markdown("---")
                 else:
                     st.write("No hay eventos registrados para esta unidad.")
@@ -139,7 +171,10 @@ def render_trazabilidad_view():
                     c_n1, c_n2 = st.columns(2)
                     with c_n1:
                         nuevo_num = st.text_input("Nuevo Número Marcado:", value=str(u_obj.get("Numero_Marcado", ""))).strip()
-                        nuevo_estado = st.selectbox("Estado de la Unidad:", ["EN STOCK", "EN VEHICULO", "BAJA / SCRAP"], index=0 if u_obj.get("Estado") == "EN STOCK" else 1)
+                        estados_unidad = ["EN STOCK", "EN VEHICULO", "BAJA / SCRAP"]
+                        estado_actual = str(u_obj.get("Estado", "EN STOCK"))
+                        estado_index = estados_unidad.index(estado_actual) if estado_actual in estados_unidad else 0
+                        nuevo_estado = st.selectbox("Estado de la Unidad:", estados_unidad, index=estado_index)
                     with c_n2:
                         df_veh = db.get_vehiculos(solo_activos=True)
                         pats = ["Sin Vehículo (En Taller)"] + sorted(df_veh["ETIQUETA_COMPLETA"].dropna().unique().tolist())
@@ -151,6 +186,7 @@ def render_trazabilidad_view():
                         nuevo_veh = st.selectbox("Vehículo Asignado:", pats, index=idx_v)
 
                     motivo_mod = st.text_input("Motivo de la Modificación:", placeholder="Ej: Corrección de grabado, marcado tardío...")
+                    email_propietario = st.text_input("Email del propietario/receptor (opcional):")
 
                     if st.form_submit_button("Guardar Cambios de Unidad", use_container_width=True):
                         if not nuevo_num:
@@ -163,20 +199,34 @@ def render_trazabilidad_view():
                         ):
                             st.error(f"El número {nuevo_num} ya existe para otra unidad del mismo tipo. Verifique el marcado físico.")
                         else:
-                            # Actualizar en lista
-                            for item in units:
-                                if str(item.get("Numero_Marcado")).strip().lower() == num_actual.lower():
-                                    item["Numero_Marcado"] = nuevo_num
-                                    item["Estado"] = nuevo_estado
-                                    item["Vehiculo_Actual"] = "" if nuevo_veh == "Sin Vehículo (En Taller)" else nuevo_veh
-                                    item["Fecha_Ultimo_Movimiento"] = pd.Timestamp.now().strftime("%Y-%m-%d %H:%M")
-                                    if motivo_mod:
-                                        item["Historial"].append({
-                                            "Fecha": pd.Timestamp.now().strftime("%Y-%m-%d %H:%M"),
-                                            "Tipo": "MODIFICACION MANUAL",
-                                            "Detalle": motivo_mod
-                                        })
-                                    break
-                            db.save_unidades_seriales(units)
-                            st.success(f"Unidad actualizada al número #{nuevo_num}.")
+                            vehiculo_nuevo = "" if nuevo_veh == "Sin Vehículo (En Taller)" else nuevo_veh
+                            resultado = db.registrar_movimiento_unidad(
+                                {**u_obj, "Numero_Marcado": nuevo_num},
+                                num_actual,
+                                nuevo_estado,
+                                vehiculo_nuevo,
+                                str(st.session_state.get("current_user", "")),
+                                motivo_mod,
+                            )
+                            if not resultado:
+                                st.error("No se pudo registrar el movimiento en la base de datos.")
+                                st.stop()
+                            pdf_path = generate_remito_pdf(resultado["header"], resultado["items"])
+                            email_status = ""
+                            if email_propietario and "@" in email_propietario:
+                                ok_mail, msg_mail = send_remito_email(
+                                    email_propietario,
+                                    str(u_obj.get("Marca", "")),
+                                    resultado["nro_remito"],
+                                    pdf_path,
+                                    tipo_remito=resultado["header"]["Tipo"],
+                                )
+                                email_status = msg_mail
+                                if ok_mail:
+                                    db.mark_remito_email_sent(resultado["nro_remito"])
+                            st.session_state["trazabilidad_exitoso"] = {
+                                "nro_remito": resultado["nro_remito"],
+                                "pdf_path": pdf_path,
+                                "email_status": email_status,
+                            }
                             st.rerun()

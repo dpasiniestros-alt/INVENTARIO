@@ -142,6 +142,13 @@ def render_admin_view():
                     df_prod.at[idx_p, "Stock_Actual"] = int(nuevo_stock)
                     df_prod.at[idx_p, "Stock_Minimo"] = int(nuevo_min)
                     db.save_productos(df_prod)
+                    db.registrar_auditoria(
+                        str(st.session_state.get("current_user", "")),
+                        "AJUSTE_STOCK",
+                        "producto",
+                        p_id,
+                        {"stock": int(nuevo_stock), "stock_minimo": int(nuevo_min), "motivo": motivo},
+                    )
                     st.success(f"Stock de {row_p['Modelo_Detalle']} actualizado a {nuevo_stock} unidades.")
                     st.rerun()
 
