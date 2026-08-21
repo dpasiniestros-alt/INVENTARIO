@@ -36,6 +36,12 @@ def get_supabase_client() -> Any:
     )
 
 
+def refresh_supabase_client() -> Any:
+    """Descarta el cliente cacheado después de una suspensión o fallo de red."""
+    get_supabase_client.clear()
+    return get_supabase_client()
+
+
 def check_supabase_connection() -> tuple[bool, str]:
     """Comprueba red, credenciales y que exista el esquema inicial."""
     client = get_supabase_client()

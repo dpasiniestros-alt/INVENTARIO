@@ -11,7 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from modules.catalog_seed import get_initial_products
-from modules.supabase_client import get_supabase_client, supabase_configured
+from modules.supabase_client import get_supabase_client, refresh_supabase_client, supabase_configured
 
 APP_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
@@ -36,7 +36,29 @@ class DatabaseManagerSupabase:
         except Exception as exc:
             self.last_error = str(exc)
             print(f"Error en Supabase: {exc}")
+            error_text = str(exc).lower()
+            transient = any(term in error_text for term in (
+                "timeout", "timed out", "connection", "connect", "reset", "temporarily", "503", "502", "504"
+            ))
+            if transient:
+                try:
+                    self.client = refresh_supabase_client()
+                    return fn()
+                except Exception as retry_exc:
+                    self.last_error = str(retry_exc)
+                    print(f"Error en Supabase tras reconectar: {retry_exc}")
             return default
+
+    def reconnect(self) -> bool:
+        """Renueva el cliente y comprueba que el esquema siga disponible."""
+        try:
+            self.client = refresh_supabase_client()
+            self.last_error = ""
+            self.client.table("productos").select("id").limit(1).execute()
+            return True
+        except Exception as exc:
+            self.last_error = str(exc)
+            return False
 
     def registrar_auditoria(self, usuario: str, accion: str, entidad: str, entidad_id: str = "", detalle: dict = None) -> bool:
         """Registra quién realizó una operación y qué entidad afectó."""

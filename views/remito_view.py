@@ -689,6 +689,9 @@ def render_remito_view():
                 return
 
             with st.spinner("Generando comprobante PDF, actualizando trazabilidad e inventario..."):
+                if hasattr(db, "reconnect") and not db.reconnect():
+                    st.error(f"No se pudo reconectar con la base de datos: {getattr(db, 'last_error', 'error de conexión')}")
+                    return
                 evidencia_images = []
                 for foto in fotos_evidencia or []:
                     try:
