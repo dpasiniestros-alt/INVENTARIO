@@ -9,7 +9,10 @@ import streamlit as st
 
 def _secret(name: str, default: str = "") -> str:
     try:
-        value = st.secrets.get(name, default)
+        value = st.secrets.get(name)
+        if value is None:
+            supabase_secrets = st.secrets.get("supabase", {})
+            value = supabase_secrets.get(name, default)
     except Exception:
         value = default
     return str(value or "").strip()
