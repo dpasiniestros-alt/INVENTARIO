@@ -238,7 +238,15 @@ def render_remito_view():
                 prod_dict = {}
                 opciones_prod = []
                 for _, p in df_cat.iterrows():
-                    stock_txt = f"(Stock: {p['Stock_Actual']})"
+                    cantidad_carrito = sum(
+                        int(item.get("Cantidad", 0))
+                        for item in st.session_state["cart_items"]
+                        if str(item.get("ID_Producto", "")) == str(p.get("ID", ""))
+                    )
+                    stock_disponible = max(0, int(p["Stock_Actual"]) - cantidad_carrito) if es_salida else int(p["Stock_Actual"])
+                    if es_salida and stock_disponible <= 0:
+                        continue
+                    stock_txt = f"(Stock: {stock_disponible})"
                     lbl = f"{p['Marca']} | {p['Modelo_Detalle']} {stock_txt}"
                     if p.get("Codigo_Pieza") and p.get("Codigo_Pieza") != "-":
                         lbl += f" [{p['Codigo_Pieza']}]"
@@ -256,22 +264,35 @@ def render_remito_view():
                     st.markdown(f"##### 🏷️ Trazabilidad: Números Marcados de {cat_sel}")
                     
                     if es_salida:
-                        # Obtener numeros marcados disponibles en stock
-                        nums_disponibles = db.get_unidades_disponibles(cat_sel, marca=p_selected["Marca"], modelo=p_selected["Modelo_Detalle"])
-                        if not nums_disponibles:
-                            # Fallback si habia stock registrado pero no unidades individuales
-                            nums_disponibles = db.get_unidades_disponibles(cat_sel)
-
-                        if nums_disponibles:
-                            st.info(f"Seleccione el/los números marcados que está retirando del stock (Disponibles: {', '.join(['#'+str(n) for n in nums_disponibles])}):")
-                            nums_seleccionados = st.multiselect("Números Marcados a entregar:", nums_disponibles)
+                        cantidad_carrito = sum(
+                            int(item.get("Cantidad", 0))
+                            for item in st.session_state["cart_items"]
+                            if str(item.get("ID_Producto", "")) == str(p_selected.get("ID", ""))
+                        )
+                        stock_disponible = max(0, int(p_selected["Stock_Actual"]) - cantidad_carrito)
+                        nums_disponibles = [
+                            numero for numero in db.get_unidades_disponibles(
+                                cat_sel, marca=p_selected["Marca"], modelo=p_selected["Modelo_Detalle"]
+                            ) if not str(numero).upper().startswith("SIN_MARCAR-")
+                        ]
+                        modo_salida = st.radio(
+                            "Tipo de unidad a retirar:",
+                            ["Marcada", "Sin marcar"],
+                            horizontal=True,
+                            key=f"modo_salida_{item_key}",
+                        )
+                        if modo_salida == "Marcada" and nums_disponibles:
+                            st.info(f"Números disponibles: {', '.join(['#' + str(n) for n in nums_disponibles])}")
+                            nums_seleccionados = st.multiselect("Números Marcados a entregar:", nums_disponibles, key=f"nums_salida_{item_key}")
                             cant = len(nums_seleccionados)
                             seriales_str = ", ".join(nums_seleccionados)
+                        elif modo_salida == "Marcada":
+                            st.warning("No hay números físicos marcados disponibles para este producto.")
+                            cant = st.number_input("Cantidad sin marcar:", min_value=1, max_value=max(1, stock_disponible), value=1, step=1, key=f"qty_unmarked_{item_key}")
+                            seriales_str = "-"
                         else:
-                            st.warning("⚠️ No hay números marcados precargados en stock para este producto. Ingrese los números que está entregando:")
-                            cant = st.number_input("Cantidad:", min_value=1, max_value=int(p_selected["Stock_Actual"]), value=1, step=1)
-                            seriales_str = st.text_input(f"Números Marcados de las {cant} unidad(es) (separados por coma):", placeholder="Ej: 1, 32, 52").strip()
-
+                            cant = st.number_input("Cantidad sin marcar:", min_value=1, max_value=max(1, stock_disponible), value=1, step=1, key=f"qty_unmarked_{item_key}")
+                            seriales_str = "-"
                     elif es_traspaso:
                         st.info("Ingrese un número marcado asignado al vehículo de origen:")
                         cant = 1
@@ -331,7 +352,7 @@ def render_remito_view():
                         for cart_item in st.session_state["cart_items"]:
                             if cart_item.get("Categoria") == cat_sel:
                                 usados.extend(str(cart_item.get("Nro_Serie_Bateria_Neumatico", "")).upper().split(","))
-                        usados = [s.strip() for s in usados if s.strip() and s.strip() != "-"]
+                        usados = [s.strip() for s in usados if s.strip() and s.strip() != "-" and not s.strip().startswith("SIN_MARCAR-")]
                         repetidos = sorted(set(nuevos_seriales).intersection(usados))
                         existentes = db.numeros_marcados_existentes(cat_sel, nuevos_seriales) if es_entrada else []
                         if len(nuevos_seriales) != len(set(nuevos_seriales)) or repetidos:
