@@ -4,6 +4,7 @@ Vista de Historial de Remitos, Descargas y Reenvio de Emails.
 """
 
 import os
+import tempfile
 import streamlit as st
 import pandas as pd
 from modules.gsheets_db import get_db
@@ -107,21 +108,22 @@ def render_historial_view():
             st.divider()
             c_btn1, c_btn2 = st.columns([1, 2])
             
-            pdf_path = rem.get("Link_PDF", "")
-            if not pdf_path or not os.path.exists(str(pdf_path)):
-                items_list = df_items.to_dict(orient="records") if not df_items.empty else []
-                pdf_path = generate_remito_pdf(rem.to_dict(), items_list)
+            pdf_link = str(rem.get("Link_PDF", "") or "")
+            pdf_path = pdf_link if os.path.exists(pdf_link) else ""
+            pdf_bytes = db.descargar_archivo_de_drive(pdf_link) if pdf_link.startswith("https://drive.google.com/") else b""
+            if not pdf_bytes and not pdf_path:
+                st.warning("El PDF original de este remito no está disponible en el almacenamiento permanente.")
 
             with c_btn1:
-                pdf_bytes = get_pdf_bytes(pdf_path)
-                st.download_button(
-                    label="📥 Descargar PDF",
-                    data=pdf_bytes,
-                    file_name=f"{nro_rem}.pdf",
-                    mime="application/pdf",
-                    key=f"dl_{nro_rem}",
-                    use_container_width=True
-                )
+                if pdf_bytes or pdf_path:
+                    st.download_button(
+                        label="📥 Descargar PDF original",
+                        data=pdf_bytes or get_pdf_bytes(pdf_path),
+                        file_name=f"{nro_rem}.pdf",
+                        mime="application/pdf",
+                        key=f"dl_{nro_rem}",
+                        use_container_width=True
+                    )
 
             with c_btn2:
                 with st.popover("📧 Reenviar por Email"):
@@ -130,7 +132,15 @@ def render_historial_view():
                         if not email_dest or "@" not in email_dest:
                             st.error("Ingrese un correo válido.")
                         else:
+                            temporary_pdf = None
+                            if not pdf_path and pdf_bytes:
+                                temporary_pdf = tempfile.NamedTemporaryFile(suffix=".pdf", delete=False)
+                                temporary_pdf.write(pdf_bytes)
+                                temporary_pdf.close()
+                                pdf_path = temporary_pdf.name
                             ok_mail, msg_mail = send_remito_email(email_dest, receptor, nro_rem, pdf_path, tipo_remito=tipo)
+                            if temporary_pdf:
+                                os.unlink(temporary_pdf.name)
                             if ok_mail:
                                 db.mark_remito_email_sent(nro_rem)
                                 st.success(msg_mail)

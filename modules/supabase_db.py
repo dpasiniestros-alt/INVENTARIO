@@ -794,6 +794,34 @@ class DatabaseManagerSupabase:
             print(f"Error subiendo archivo a Drive: {exc}")
             return ""
 
+    def descargar_archivo_de_drive(self, enlace: str) -> bytes:
+        """Descarga el archivo original guardado en Drive."""
+        try:
+            import io
+            import re
+            from google.oauth2.service_account import Credentials
+            from googleapiclient.discovery import build
+            from googleapiclient.http import MediaIoBaseDownload
+
+            match = re.search(r"/d/([^/]+)", str(enlace))
+            if not match or "gcp_service_account" not in st.secrets:
+                return b""
+            creds = Credentials.from_service_account_info(
+                dict(st.secrets["gcp_service_account"]),
+                scopes=["https://www.googleapis.com/auth/drive.readonly"],
+            )
+            service = build("drive", "v3", credentials=creds)
+            buffer = io.BytesIO()
+            request = service.files().get_media(fileId=match.group(1))
+            downloader = MediaIoBaseDownload(buffer, request)
+            done = False
+            while not done:
+                _, done = downloader.next_chunk()
+            return buffer.getvalue()
+        except Exception as exc:
+            print(f"Error descargando archivo de Drive: {exc}")
+            return b""
+
     # ===== RESPONSABLES =====
     def get_responsables(self) -> pd.DataFrame:
         """Lee responsables de Supabase."""

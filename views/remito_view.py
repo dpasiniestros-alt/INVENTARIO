@@ -696,7 +696,12 @@ def render_remito_view():
                     except Exception:
                         st.warning(f"No se pudo leer la foto {foto.name}.")
                 pdf_path = generate_remito_pdf(remito_header, items_to_save, signature_img, evidencia_images)
-                remito_header["Link_PDF"] = pdf_path
+                pdf_bytes = get_pdf_bytes(pdf_path)
+                pdf_link = db.subir_archivo_a_drive(pdf_bytes, f"{nro_remito}.pdf")
+                if not pdf_link:
+                    st.error("No se pudo guardar el comprobante permanente. El remito no fue emitido.")
+                    return
+                remito_header["Link_PDF"] = pdf_link
                 if not db.guardar_remito(remito_header, items_to_save):
                     detalle_error = getattr(db, "last_error", "Error no especificado")
                     if "stock" in detalle_error.lower() or "disponible" in detalle_error.lower():

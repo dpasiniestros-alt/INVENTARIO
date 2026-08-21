@@ -105,16 +105,11 @@ def render_trazabilidad_view():
                             if rem:
                                 remitos = db.get_remitos()
                                 remito_row = remitos[remitos["Nro_Remito"].astype(str) == str(rem)] if not remitos.empty and "Nro_Remito" in remitos.columns else pd.DataFrame()
-                                items_remito = db.get_remito_items(str(rem))
                                 if not remito_row.empty:
-                                    pdf_path = generate_remito_pdf(remito_row.iloc[0].to_dict(), items_remito.to_dict(orient="records"))
-                                    st.download_button(
-                                        "📥 Descargar remito",
-                                        data=get_pdf_bytes(pdf_path),
-                                        file_name=f"{rem}.pdf",
-                                        mime="application/pdf",
-                                        key=f"descargar_traza_{rem}_{i}",
-                                    )
+                                    pdf_link = str(remito_row.iloc[0].get("Link_PDF", "") or "")
+                                    pdf_bytes = db.descargar_archivo_de_drive(pdf_link) if pdf_link.startswith("https://drive.google.com/") else b""
+                                    if pdf_bytes:
+                                        st.download_button("📥 Descargar remito original", data=pdf_bytes, file_name=f"{rem}.pdf", mime="application/pdf", key=f"descargar_traza_{rem}_{i}")
                             st.markdown("---")
                 else:
                     st.write("No hay eventos registrados para esta unidad.")
@@ -225,7 +220,8 @@ def render_trazabilidad_view():
                                 st.error("No se pudo registrar el movimiento en la base de datos.")
                                 st.stop()
                             pdf_path = generate_remito_pdf(resultado["header"], resultado["items"])
-                            db.actualizar_link_pdf(resultado["nro_remito"], pdf_path)
+                            pdf_link = db.subir_archivo_a_drive(get_pdf_bytes(pdf_path), f"{resultado['nro_remito']}.pdf")
+                            db.actualizar_link_pdf(resultado["nro_remito"], pdf_link)
                             email_status = ""
                             if email_propietario and "@" in email_propietario:
                                 ok_mail, msg_mail = send_remito_email(
