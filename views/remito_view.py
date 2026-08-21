@@ -212,12 +212,18 @@ def render_remito_view():
     if df_prod.empty:
         st.warning("No hay productos disponibles en STOCK_PRODUCTOS. Verifique la conexión con Google Sheets.")
         return
-    categorias_disponibles = sorted(df_prod["Categoria"].unique().tolist()) if not df_prod.empty else []
+    if es_salida:
+        categorias_disponibles = sorted(
+            df_prod.loc[df_prod["Stock_Actual"] > 0, "Categoria"].unique().tolist()
+        )
+    else:
+        categorias_disponibles = sorted(df_prod["Categoria"].unique().tolist()) if not df_prod.empty else []
 
     with st.expander("➕ Agregar Artículo al Remito", expanded=True):
         cat_sel = st.selectbox("Categoría de Artículo:", categorias_disponibles)
         
-        df_cat = df_prod[df_prod["Categoria"] == cat_sel]
+        df_cat_all = df_prod[df_prod["Categoria"] == cat_sel]
+        df_cat = df_cat_all.copy()
         unidades_origen = db.get_unidades_en_vehiculo(veh_origen_final) if es_traspaso and veh_origen_final else []
         if es_traspaso and unidades_origen:
             ids_origen = {str(unit.get("ID_Producto", "")) for unit in unidades_origen}
@@ -244,9 +250,12 @@ def render_remito_view():
                         if str(item.get("ID_Producto", "")) == str(p.get("ID", ""))
                     )
                     stock_disponible = max(0, int(p["Stock_Actual"]) - cantidad_carrito) if es_salida else int(p["Stock_Actual"])
-                    if es_salida and stock_disponible <= 0:
+                    ya_en_carrito = cantidad_carrito > 0
+                    if es_salida and stock_disponible <= 0 and not ya_en_carrito:
                         continue
                     stock_txt = f"(Stock: {stock_disponible})"
+                    if ya_en_carrito:
+                        stock_txt += f" | En carrito: {cantidad_carrito}"
                     lbl = f"{p['Marca']} | {p['Modelo_Detalle']} {stock_txt}"
                     if p.get("Codigo_Pieza") and p.get("Codigo_Pieza") != "-":
                         lbl += f" [{p['Codigo_Pieza']}]"
@@ -254,11 +263,32 @@ def render_remito_view():
                     prod_dict[lbl] = p
 
                 if not opciones_prod:
-                    st.warning("No hay artículos de esta categoría asignados al vehículo de origen.")
-                    return
-                prod_sel_lbl = st.selectbox("Seleccione Producto:", opciones_prod)
-                p_selected = prod_dict.get(prod_sel_lbl)
+                    st.warning("No hay stock disponible para agregar en esta categoría.")
+                    st.info("Podés continuar con los artículos que ya están en el carrito y emitir el remito.")
+                    productos_carrito = [
+                        item for item in st.session_state["cart_items"]
+                        if item.get("Categoria") == cat_sel
+                    ]
+                    p_selected = None
+                    if productos_carrito:
+                        producto_id_carrito = str(productos_carrito[0].get("ID_Producto", ""))
+                        filas_carrito = df_cat_all[df_cat_all["ID"].astype(str) == producto_id_carrito]
+                        if not filas_carrito.empty:
+                            p_selected = filas_carrito.iloc[0]
+                else:
+                    prod_sel_lbl = st.selectbox("Seleccione Producto:", opciones_prod)
+                    p_selected = prod_dict.get(prod_sel_lbl)
+                if p_selected is None:
+                    st.info("Seleccione otra categoría para agregar artículos o continúe con el carrito.")
+                    st.stop()
                 item_key = str(p_selected.get("ID", cat_sel)).replace(" ", "_")
+                cantidad_carrito = sum(
+                    int(item.get("Cantidad", 0))
+                    for item in st.session_state["cart_items"]
+                    if str(item.get("ID_Producto", "")) == str(p_selected.get("ID", ""))
+                )
+                stock_disponible = max(0, int(p_selected["Stock_Actual"]) - cantidad_carrito) if es_salida else int(p_selected["Stock_Actual"])
+                puede_agregar = not es_salida or stock_disponible > 0
 
                 if cat_sel in ["BATERIA", "NEUMATICO"]:
                     st.markdown(f"##### 🏷️ Trazabilidad: Números Marcados de {cat_sel}")
@@ -270,11 +300,20 @@ def render_remito_view():
                             if str(item.get("ID_Producto", "")) == str(p_selected.get("ID", ""))
                         )
                         stock_disponible = max(0, int(p_selected["Stock_Actual"]) - cantidad_carrito)
+                        seriales_en_carrito = {
+                            serial.strip().upper()
+                            for item in st.session_state["cart_items"]
+                            if str(item.get("ID_Producto", "")) == str(p_selected.get("ID", ""))
+                            for serial in str(item.get("Nro_Serie_Bateria_Neumatico", "")).split(",")
+                            if serial.strip() and serial.strip() != "-"
+                        }
                         nums_disponibles = [
                             numero for numero in db.get_unidades_disponibles(
                                 cat_sel, marca=p_selected["Marca"], modelo=p_selected["Modelo_Detalle"]
                             ) if not str(numero).upper().startswith("SIN_MARCAR-")
+                            and str(numero).upper() not in seriales_en_carrito
                         ]
+                        puede_agregar = stock_disponible > 0
                         modo_salida = st.radio(
                             "Tipo de unidad a retirar:",
                             ["Marcada", "Sin marcar"],
@@ -288,10 +327,10 @@ def render_remito_view():
                             seriales_str = ", ".join(nums_seleccionados)
                         elif modo_salida == "Marcada":
                             st.warning("No hay números físicos marcados disponibles para este producto.")
-                            cant = st.number_input("Cantidad sin marcar:", min_value=1, max_value=max(1, stock_disponible), value=1, step=1, key=f"qty_unmarked_{item_key}")
+                            cant = st.number_input("Cantidad sin marcar:", min_value=1, max_value=max(1, stock_disponible), value=1, step=1, key=f"qty_unmarked_{item_key}", disabled=not puede_agregar)
                             seriales_str = "-"
                         else:
-                            cant = st.number_input("Cantidad sin marcar:", min_value=1, max_value=max(1, stock_disponible), value=1, step=1, key=f"qty_unmarked_{item_key}")
+                            cant = st.number_input("Cantidad sin marcar:", min_value=1, max_value=max(1, stock_disponible), value=1, step=1, key=f"qty_unmarked_{item_key}", disabled=not puede_agregar)
                             seriales_str = "-"
                     elif es_traspaso:
                         st.info("Ingrese un número marcado asignado al vehículo de origen:")
@@ -330,7 +369,7 @@ def render_remito_view():
                     with col_c2:
                         seriales_str = "-"
 
-                if st.button("📥 Agregar al Carrito", use_container_width=True):
+                if st.button("📥 Agregar al Carrito", use_container_width=True, disabled=es_salida and not puede_agregar):
                     if es_traspaso:
                         numero_traspaso = str(seriales_str).strip()
                         unidad_traspaso = db.buscar_historial_unidad(numero_traspaso) if numero_traspaso else None
