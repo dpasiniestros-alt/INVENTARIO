@@ -75,6 +75,14 @@ def render_trazabilidad_view():
                         st.info(f"📍 **Vehículo Actual:** {unidad_info.get('Vehiculo_Actual', '-')}")
                     else:
                         st.success("🏢 Ubicación actual: **Taller Automotor (Disponible)**")
+                    vehiculos_historicos = []
+                    for evento in unidad_info.get("Historial", []):
+                        for campo in ("Vehiculo", "Vehiculo_Destino", "Vehiculo_Nuevo"):
+                            vehiculo = str(evento.get(campo, "")).strip()
+                            if vehiculo and vehiculo not in vehiculos_historicos:
+                                vehiculos_historicos.append(vehiculo)
+                    if vehiculos_historicos:
+                        st.markdown(f"**Patentes donde fue instalada:** {', '.join(vehiculos_historicos)}")
                     st.markdown(f"**Última actualización:** {unidad_info.get('Fecha_Ultimo_Movimiento', '-')}")
 
                 st.divider()
