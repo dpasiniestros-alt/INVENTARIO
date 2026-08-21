@@ -12,6 +12,7 @@ import streamlit as st
 from modules.catalog_seed import (
     GERENCIAS, RESPONSABLES_INICIALES, PATENTES_INICIALES, VEHICULOS_INICIALES, get_initial_products
 )
+from modules.app_logging import log_exception
 
 DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
@@ -66,6 +67,7 @@ class DatabaseManager:
                 return pd.DataFrame(rows, columns=headers)
             except Exception as exc:
                 last_error = exc
+                log_exception("gsheets", f"Error leyendo la hoja {title}", exc)
                 if attempt == 0:
                     time.sleep(0.4)
         print(f"Error leyendo la hoja {title}: {last_error}")
@@ -100,14 +102,16 @@ class DatabaseManager:
                 if veh_id:
                     try:
                         self.spreadsheet_vehiculos = self.client.open_by_key(veh_id)
-                    except Exception:
+                    except Exception as exc:
+                        log_exception("gsheets", f"No se pudo abrir la hoja {sheet_name}", exc)
                         pass
 
                 inv_id = safe_secret("GSHEET_INVENTARIO_ID", "1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg")
                 if inv_id:
                     try:
                         self.spreadsheet_inventario = self.client.open_by_key(inv_id)
-                    except Exception:
+                    except Exception as exc:
+                        log_exception("gsheets", f"No se pudo abrir la hoja de órdenes {sname}", exc)
                         pass
 
                 ord_id = safe_secret("GSHEET_ORDENES_ID", "1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY")

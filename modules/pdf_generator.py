@@ -15,6 +15,7 @@ from reportlab.platypus import (
 )
 from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
 from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT, TA_JUSTIFY
+from modules.app_logging import log_exception
 
 TEMP_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "temp_remitos")
 os.makedirs(TEMP_DIR, exist_ok=True)
@@ -261,7 +262,8 @@ def generate_remito_pdf(remito_header: dict, items: list, signature_image: PILIm
                 image.save(buffer, format="JPEG", quality=85)
                 buffer.seek(0)
                 evidence_cells.append(RLImage(buffer, width=7.5 * cm, height=7.5 * cm, kind="proportional"))
-            except Exception:
+            except Exception as exc:
+                log_exception("pdf", "No se pudo incorporar una imagen al PDF", exc)
                 continue
         for index in range(0, len(evidence_cells), 2):
             row = evidence_cells[index:index + 2]

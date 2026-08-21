@@ -11,6 +11,7 @@ import pandas as pd
 import streamlit as st
 
 from modules.catalog_seed import get_initial_products
+from modules.app_logging import log_exception
 from modules.supabase_client import get_supabase_client, refresh_supabase_client, supabase_configured
 
 APP_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
@@ -35,7 +36,7 @@ class DatabaseManagerSupabase:
             return fn()
         except Exception as exc:
             self.last_error = str(exc)
-            print(f"Error en Supabase: {exc}")
+            log_exception("supabase", "Error ejecutando operación", exc)
             error_text = str(exc).lower()
             transient = any(term in error_text for term in (
                 "timeout", "timed out", "connection", "connect", "reset", "temporarily", "503", "502", "504"
@@ -46,7 +47,7 @@ class DatabaseManagerSupabase:
                     return fn()
                 except Exception as retry_exc:
                     self.last_error = str(retry_exc)
-                    print(f"Error en Supabase tras reconectar: {retry_exc}")
+                    log_exception("supabase", "Error en Supabase tras reconectar", retry_exc)
             return default
 
     def reconnect(self) -> bool:

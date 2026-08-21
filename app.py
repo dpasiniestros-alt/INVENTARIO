@@ -3,7 +3,12 @@
 Sistema de Gestion de Inventario y Remitos Digitales - Taller Automotor.
 """
 
+import sys
 import streamlit as st
+from modules.app_logging import AppExceptionHook, configure_logging, log_exception
+
+configure_logging()
+sys.excepthook = AppExceptionHook()
 
 st.set_page_config(
     page_title="Taller Automotor - Remitos e Inventario",
@@ -94,4 +99,8 @@ def main():
         render_admin_view()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as exc:
+        log_exception("app.main", "Error no controlado durante la ejecución de la aplicación", exc)
+        raise

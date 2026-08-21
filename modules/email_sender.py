@@ -10,6 +10,7 @@ from email.mime.text import MIMEText
 from email.mime.base import MIMEBase
 from email import encoders
 import streamlit as st
+from modules.app_logging import log_exception
 
 def send_remito_email(destinatario_email: str, destinatario_nombre: str, nro_remito: str, pdf_path: str, tipo_remito: str = "SALIDA") -> tuple[bool, str]:
     if not destinatario_email or "@" not in destinatario_email:
@@ -32,8 +33,8 @@ def send_remito_email(destinatario_email: str, destinatario_nombre: str, nro_rem
     try:
         from modules.gsheets_db import get_db
         template_cfg = get_db().get_email_config()
-    except Exception:
-        pass
+    except Exception as exc:
+        log_exception("email", "No se pudo leer la plantilla de email", exc)
 
     try:
         msg = MIMEMultipart()
@@ -92,5 +93,6 @@ def send_remito_email(destinatario_email: str, destinatario_nombre: str, nro_rem
             server.sendmail(sender_email, recipients, msg.as_string())
 
         return True, f"Email enviado con éxito a {destinatario_email}"
-    except Exception as e:
-        return False, f"Error al enviar correo: {str(e)}"
+    except Exception as exc:
+        log_exception("email", "Error al enviar correo", exc)
+        return False, f"Error al enviar correo: {str(exc)}"
