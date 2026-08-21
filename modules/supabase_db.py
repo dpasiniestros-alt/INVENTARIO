@@ -32,19 +32,21 @@ class DatabaseManagerSupabase:
     # ===== PRODUCTOS =====
     def get_productos(self) -> pd.DataFrame:
         """Lee productos de Supabase."""
+        columnas_sql = ["id", "categoria", "marca", "modelo_detalle", "codigo_pieza", "stock_actual", "stock_minimo", "unidad", "requiere_serial"]
+        columnas_vista = ["ID", "Categoria", "Marca", "Modelo_Detalle", "Codigo_Pieza", "Stock_Actual", "Stock_Minimo", "Unidad", "Requiere_Serial"]
+
         def fetch():
             response = self.client.table("productos").select("*").execute()
             if response.data:
                 return pd.DataFrame(response.data)
-            return pd.DataFrame(columns=["id", "categoria", "marca", "modelo_detalle", "codigo_pieza", "stock_actual", "stock_minimo", "unidad", "requiere_serial"])
+            return pd.DataFrame(columns=columnas_sql)
 
-        df = self._safe_execute(fetch, pd.DataFrame(columns=["id", "categoria", "marca", "modelo_detalle", "codigo_pieza", "stock_actual", "stock_minimo", "unidad", "requiere_serial"]))
+        df = self._safe_execute(fetch, pd.DataFrame(columns=columnas_sql))
         
-        # Compatibilidad: renombra 'id' a 'ID'
-        if not df.empty and 'id' in df.columns:
-            df = df.rename(columns={'id': 'ID'})
+        if not df.empty:
+            df = df.rename(columns=dict(zip(columnas_sql, columnas_vista)))
 
-        for col in ["stock_actual", "stock_minimo"]:
+        for col in ["Stock_Actual", "Stock_Minimo"]:
             if col in df.columns:
                 df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0).astype(int)
 
@@ -83,7 +85,7 @@ class DatabaseManagerSupabase:
                 return False
             
             row_idx = idx[0]
-            actual = int(df.at[row_idx, "stock_actual"])
+            actual = int(df.at[row_idx, "Stock_Actual"])
             
             if operacion == "salida":
                 if actual < cantidad:
@@ -607,7 +609,7 @@ class DatabaseManagerSupabase:
         def reset():
             productos = self.get_productos()
             if not productos.empty:
-                productos["stock_actual"] = 0
+                productos["Stock_Actual"] = 0
                 self.save_productos(productos)
 
             self.client.table("unidades_serializadas").delete().neq("id", -1).execute()
