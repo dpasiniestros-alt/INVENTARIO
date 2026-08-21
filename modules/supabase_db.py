@@ -835,7 +835,14 @@ class DatabaseManagerSupabase:
         if df.empty:
             from modules.catalog_seed import RESPONSABLES_INICIALES
             df = pd.DataFrame(RESPONSABLES_INICIALES)
-            self.client.table("responsables").insert(RESPONSABLES_INICIALES).execute()
+            try:
+                self.client.table("responsables").upsert(
+                    RESPONSABLES_INICIALES,
+                    on_conflict="nombre",
+                ).execute()
+            except Exception as exc:
+                self.last_error = str(exc)
+                print(f"Error inicializando responsables en Supabase: {exc}")
         
         return df
 
