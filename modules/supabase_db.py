@@ -50,6 +50,25 @@ class DatabaseManagerSupabase:
 
         return self._safe_execute(insert, False)
 
+    def get_email_config(self) -> dict:
+        defaults = {
+            "subject": "Comprobante Digital: Remito de {tipo_remito} N° {nro_remito}",
+            "body": "Estimado/a {destinatario_nombre},\n\nAdjunto encontrará el comprobante del movimiento de taller {nro_remito}.\n\nTipo de movimiento: {tipo_remito}",
+        }
+        def fetch():
+            response = self.client.table("configuracion_app").select("valor").eq("clave", "email_template").limit(1).execute()
+            if response.data:
+                defaults.update(response.data[0].get("valor") or {})
+            return defaults
+        return self._safe_execute(fetch, defaults)
+
+    def save_email_config(self, config: dict, usuario: str = "") -> bool:
+        def save():
+            self.client.table("configuracion_app").upsert({"clave": "email_template", "valor": config}).execute()
+            self.registrar_auditoria(usuario, "MODIFICAR_PLANTILLA_EMAIL", "configuracion", "email_template", config)
+            return True
+        return self._safe_execute(save, False)
+
     # ===== PRODUCTOS =====
     def get_productos(self) -> pd.DataFrame:
         """Lee productos de Supabase."""
@@ -317,7 +336,7 @@ class DatabaseManagerSupabase:
 
         self.save_unidades_seriales(units)
 
-    def registrar_movimiento_unidad(self, unidad: dict, numero_anterior: str, estado_nuevo: str, vehiculo_nuevo: str, responsable: str, motivo: str = "") -> dict | None:
+    def registrar_movimiento_unidad(self, unidad: dict, numero_anterior: str, estado_nuevo: str, vehiculo_nuevo: str, responsable: str, motivo: str = "", email_receptor: str = "") -> dict | None:
         """Emite comprobante y actualiza una unidad editada manualmente."""
         def save():
             numero_nuevo = str(unidad.get("Numero_Marcado", "")).strip()
@@ -344,7 +363,7 @@ class DatabaseManagerSupabase:
                 "Fecha_Hora": fecha_hora,
                 "Responsable_Entrega": responsable,
                 "Receptor_Nombre": responsable,
-                "Receptor_Email": "",
+                "Receptor_Email": email_receptor,
                 "Gerencia": "TALLER",
                 "Patente": vehiculo_nuevo,
                 "Vehiculo_Origen": vehiculo_anterior,
@@ -378,6 +397,9 @@ class DatabaseManagerSupabase:
                 "patente": vehiculo_nuevo,
                 "receptor": responsable,
                 "observaciones": detalle,
+                "email_receptor": email_receptor,
+                "nro_orden_taller": "",
+                "vehiculo_origen": vehiculo_anterior,
             }).execute()
             self.client.table("remito_items").insert({
                 "nro_remito": nro_remito,
@@ -456,6 +478,9 @@ class DatabaseManagerSupabase:
                     'foto_factura': 'Foto_Factura',
                     'observaciones': 'Observaciones',
                     'estado': 'Estado',
+                    'nro_orden_taller': 'Nro_Orden_Taller',
+                    'vehiculo_origen': 'Vehiculo_Origen',
+                    'link_pdf': 'Link_PDF',
                 })
                 df["Fecha_Hora"] = df.get("Fecha", "").astype(str) + " " + df.get("Hora", "").astype(str)
                 df["Enviado_Email"] = df.get("Estado", "").astype(str).eq("Email enviado").map({True: "SI", False: "NO"})
@@ -508,6 +533,9 @@ class DatabaseManagerSupabase:
                 "receptor": remito_header.get("Receptor_Nombre", ""),
                 "email_receptor": remito_header.get("Receptor_Email", ""),
                 "observaciones": remito_header.get("Observaciones", ""),
+                "nro_orden_taller": remito_header.get("Nro_Orden_Taller", ""),
+                "vehiculo_origen": remito_header.get("Vehiculo_Origen", ""),
+                "link_pdf": remito_header.get("Link_PDF", ""),
             }).execute()
 
             # Inserta ítems
@@ -679,6 +707,12 @@ class DatabaseManagerSupabase:
             return True
 
         return self._safe_execute(save, False)
+
+    def actualizar_link_pdf(self, nro_remito: str, link_pdf: str) -> bool:
+        def update():
+            self.client.table("remitos").update({"link_pdf": link_pdf}).eq("nro_remito", nro_remito).execute()
+            return True
+        return self._safe_execute(update, False)
 
     def guardar_remito_en_gsheet(self, remito_data: dict, numero_factura: str = "", foto_factura_url: str = "") -> bool:
         """Compatibilidad con el nombre antiguo; nunca escribe en Google Sheets."""

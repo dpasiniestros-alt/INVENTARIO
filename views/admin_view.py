@@ -171,6 +171,24 @@ def render_admin_view():
         else:
             st.info("⚪ Para habilitar el envío automático de PDFs por correo, configura la sección [email] en secrets.toml.")
 
+        st.markdown("### ✉️ Plantilla del mensaje de email")
+        email_template = db.get_email_config()
+        with st.form("form_email_template"):
+            email_subject = st.text_input("Asunto:", value=email_template.get("subject", ""))
+            email_body = st.text_area(
+                "Mensaje:",
+                value=email_template.get("body", ""),
+                height=180,
+                help="Variables disponibles: {destinatario_nombre}, {nro_remito}, {tipo_remito}",
+            )
+            if st.form_submit_button("Guardar plantilla", use_container_width=True):
+                if db.save_email_config(
+                    {"subject": email_subject, "body": email_body},
+                    str(st.session_state.get("current_user", "")),
+                ):
+                    st.success("Plantilla de email actualizada.")
+                    st.rerun()
+
         with st.expander("📖 Ver Guía Rápida de Configuración de Secrets"):
             st.code("""
 # En Streamlit Cloud > Settings > Secrets:

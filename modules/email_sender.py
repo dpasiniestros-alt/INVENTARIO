@@ -28,18 +28,31 @@ def send_remito_email(destinatario_email: str, destinatario_nombre: str, nro_rem
     sender_password = email_cfg.get("sender_password")
     sender_name = email_cfg.get("sender_name", "Taller Automotor")
     copy_taller = email_cfg.get("copy_to_taller", "")
+    template_cfg = {}
+    try:
+        from modules.gsheets_db import get_db
+        template_cfg = get_db().get_email_config()
+    except Exception:
+        pass
 
     try:
         msg = MIMEMultipart()
         msg['From'] = f"{sender_name} <{sender_email}>"
         msg['To'] = destinatario_email
-        msg['Subject'] = f"Comprobante Digital: Remito de {tipo_remito} N° {nro_remito}"
+        template_values = {
+            "destinatario_nombre": destinatario_nombre,
+            "nro_remito": nro_remito,
+            "tipo_remito": tipo_remito,
+        }
+        subject = template_cfg.get("subject", "Comprobante Digital: Remito de {tipo_remito} N° {nro_remito}").format(**template_values)
+        msg['Subject'] = subject
 
         recipients = [destinatario_email]
         if copy_taller and copy_taller != destinatario_email:
             msg['Cc'] = copy_taller
             recipients.append(copy_taller)
 
+        custom_body = template_cfg.get("body", "").format(**template_values)
         html_body = f"""
         <html>
         <body style="font-family: Arial, sans-serif; color: #334155; line-height: 1.6;">
@@ -49,8 +62,7 @@ def send_remito_email(destinatario_email: str, destinatario_nombre: str, nro_rem
                     <p style="margin: 5px 0 0 0; font-size: 14px;">Departamento Automotor - Área de Taller</p>
                 </div>
                 <div style="padding: 24px;">
-                    <p>Estimado/a <strong>{destinatario_nombre}</strong>,</p>
-                    <p>Adjunto a este correo encontrará el remito oficial correspondiente al movimiento de taller:</p>
+                    <p style="white-space: pre-line;">{custom_body}</p>
                     <div style="background-color: #F8FAFC; border-left: 4px solid #0284C7; padding: 12px 16px; margin: 16px 0;">
                         <p style="margin: 4px 0;"><strong>N° de Remito:</strong> {nro_remito}</p>
                         <p style="margin: 4px 0;"><strong>Tipo de Movimiento:</strong> Remito de {tipo_remito}</p>

@@ -50,7 +50,7 @@ def render_trazabilidad_view():
         
         c_s1, c_s2 = st.columns([2, 1])
         with c_s1:
-            q_num = st.text_input("Ingrese o busque el número marcado de Batería o Neumático:", placeholder="Ej: 32, 1, 52, 4, BAT-101...").strip()
+            q_num = st.text_input("Ingrese o busque el número marcado de Batería o Neumático:", value=st.session_state.get("traza_numero_seleccionado", ""), placeholder="Ej: 32, 1, 52, 4, BAT-101...").strip()
         with c_s2:
             st.markdown("<br/>", unsafe_allow_html=True)
             btn_buscar = st.button("Buscar Historial", use_container_width=True)
@@ -146,6 +146,10 @@ def render_trazabilidad_view():
                     "Fecha_Ultimo_Movimiento": st.column_config.TextColumn("Último Movimiento")
                 }
             )
+            for unit in df_show.to_dict(orient="records"):
+                if st.button(f"🔎 Ver historial #{unit.get('Numero_Marcado', '')}", key=f"ver_hist_{unit.get('id', unit.get('Numero_Marcado', ''))}"):
+                    st.session_state["traza_numero_seleccionado"] = str(unit.get("Numero_Marcado", ""))
+                    st.rerun()
         else:
             st.info("No hay unidades registradas aún.")
 
@@ -207,11 +211,13 @@ def render_trazabilidad_view():
                                 vehiculo_nuevo,
                                 str(st.session_state.get("current_user", "")),
                                 motivo_mod,
+                                email_propietario,
                             )
                             if not resultado:
                                 st.error("No se pudo registrar el movimiento en la base de datos.")
                                 st.stop()
                             pdf_path = generate_remito_pdf(resultado["header"], resultado["items"])
+                            db.actualizar_link_pdf(resultado["nro_remito"], pdf_path)
                             email_status = ""
                             if email_propietario and "@" in email_propietario:
                                 ok_mail, msg_mail = send_remito_email(
