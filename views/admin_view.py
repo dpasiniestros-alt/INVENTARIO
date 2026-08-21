@@ -83,7 +83,7 @@ def render_admin_view():
         st.markdown("### 🚗 Gestión de Flota y Patentes")
         st.caption("Estado de vehículos (ACTIVO, BAJA, ACTIVO (OTROS)) y registro de Fecha de Baja para trazabilidad histórica.")
 
-        df_veh = db.get_vehiculos(solo_activos=False)
+        df_veh = db.get_vehiculos(solo_activos=True)
 
         q_pat = st.text_input("🔍 Buscar Patente:", placeholder="Ej: AF395...").strip().upper()
         if q_pat and not df_veh.empty:

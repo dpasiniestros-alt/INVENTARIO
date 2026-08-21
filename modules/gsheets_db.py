@@ -476,7 +476,7 @@ class DatabaseManager:
         df["ETIQUETA_COMPLETA"] = df.apply(format_veh_label, axis=1)
 
         if solo_activos and "STATUS" in df.columns:
-            df = df[df["STATUS"].astype(str).str.upper().str.contains("ACTIVO", na=False)]
+            df = df[df["STATUS"].astype(str).str.strip().str.upper() == "ACTIVO"]
 
         return df
 
