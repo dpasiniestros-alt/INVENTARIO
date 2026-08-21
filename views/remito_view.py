@@ -698,7 +698,12 @@ def render_remito_view():
                 pdf_path = generate_remito_pdf(remito_header, items_to_save, signature_img, evidencia_images)
                 remito_header["Link_PDF"] = pdf_path
                 if not db.guardar_remito(remito_header, items_to_save):
-                    st.error("No se pudo guardar el remito en la base de datos. No se aplicó el movimiento.")
+                    detalle_error = getattr(db, "last_error", "Error no especificado")
+                    if "stock" in detalle_error.lower() or "disponible" in detalle_error.lower():
+                        st.error(f"No se puede emitir el remito: {detalle_error}")
+                    else:
+                        st.error(f"No se pudo guardar el remito en la base de datos: {detalle_error}")
+                    st.info("No se aplicó el movimiento. Verifique que Supabase tenga actualizado el esquema SQL.")
                     return
                 
                 # Subir foto de factura a Google Drive (si existe)

@@ -43,9 +43,8 @@ def check_supabase_connection() -> tuple[bool, str]:
         return False, "Faltan SUPABASE_URL o SUPABASE_SERVICE_ROLE_KEY en Secrets."
 
     try:
-        response = client.table("productos").select("id", count="exact").limit(1).execute()
-        if response.count is None:
-            return False, "Supabase responde, pero no se pudo validar la tabla productos."
+        client.table("productos").select("id", count="exact").limit(1).execute()
+        client.table("remitos").select("nro_remito,nro_orden_taller,vehiculo_origen,link_pdf").limit(1).execute()
         return True, "Supabase conectado y esquema disponible."
     except Exception as exc:
-        return False, f"Supabase no esta listo: {exc}"
+        return False, f"Supabase no esta listo o falta actualizar el esquema: {exc}"

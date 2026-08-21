@@ -25,6 +25,7 @@ class DatabaseManagerSupabase:
 
     def __init__(self):
         self.client = get_supabase_client()
+        self.last_error = ""
         self.is_connected_gsheets = False  # Compatibilidad: usamos Supabase ahora
         self.is_connected_supabase = self.client is not None
 
@@ -33,6 +34,7 @@ class DatabaseManagerSupabase:
         try:
             return fn()
         except Exception as exc:
+            self.last_error = str(exc)
             print(f"Error en Supabase: {exc}")
             return default
 
@@ -516,6 +518,24 @@ class DatabaseManagerSupabase:
         """Guarda un remito completo (encabezado + ítems) en Supabase."""
         def save():
             nro_remito = remito_header.get("Nro_Remito", "")
+            tipo_rem = remito_header.get("Tipo", "SALIDA").upper()
+
+            if not nro_remito or not items:
+                self.last_error = "El remito no tiene número o artículos."
+                return False
+
+            if "SALIDA" in tipo_rem:
+                stock_por_producto = {}
+                for item in items:
+                    producto_id = str(item.get("ID_Producto", ""))
+                    stock_por_producto[producto_id] = stock_por_producto.get(producto_id, 0) + int(item.get("Cantidad", 0))
+                productos = self.get_productos()
+                for producto_id, cantidad in stock_por_producto.items():
+                    filas = productos[productos["ID"].astype(str) == producto_id] if not productos.empty else pd.DataFrame()
+                    stock_actual = int(filas.iloc[0]["Stock_Actual"]) if not filas.empty else -1
+                    if stock_actual < cantidad:
+                        self.last_error = f"Stock insuficiente para {producto_id}: disponible {max(stock_actual, 0)}, solicitado {cantidad}."
+                        return False
             
             # Inserta remito
             self.client.table("remitos").insert({
@@ -552,7 +572,6 @@ class DatabaseManagerSupabase:
                 }).execute()
 
             # Procesa cambios de stock y trazabilidad
-            tipo_rem = remito_header.get("Tipo", "SALIDA").upper()
             responsable = remito_header.get("Responsable_Entrega", "")
             receptor = remito_header.get("Receptor_Nombre", "")
             vehiculo = remito_header.get("Patente", "")
