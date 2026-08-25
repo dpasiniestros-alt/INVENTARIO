@@ -525,6 +525,12 @@ class DatabaseManager:
         if cols_norm:
             df.rename(columns=cols_norm, inplace=True)
 
+        # La hoja de OT tiene columnas duplicadas y el archivo original ya trae una
+        # columna Nro_OT extra. Debemos conservar solo la primera para que pandas no
+        # devuelva un DataFrame cuando se accede a df["Nro_OT"].
+        if not df.empty:
+            df = df.loc[:, ~df.columns.duplicated(keep="first")]
+
         for req in ["Nro_OT", "Descripcion_Trabajo", "Patente", "Estado", "Gerencia", "Fecha"]:
             if req not in df.columns:
                 df[req] = ""
