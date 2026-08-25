@@ -99,7 +99,7 @@ https://share.streamlit.io/TU_USUARIO/planilla-inventario
 - Ve a [Google Drive](https://drive.google.com)
 - Comparte cada Sheet con la email de la cuenta de servicio:
   ```
-  planilla-inventario@inventario-505919.iam.gserviceaccount.com
+  EMAIL_DE_LA_NUEVA_CUENTA_DE_SERVICIO
   ```
 - Dale permisos de **Editor**
 

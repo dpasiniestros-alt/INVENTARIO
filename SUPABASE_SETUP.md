@@ -4,7 +4,8 @@
 
 **La aplicación operativa ahora usa EXCLUSIVAMENTE Supabase (PostgreSQL online).**
 
-- **Google Sheets**: Solo para informes y exportaciones (lectura desde SQL).
+- **Google Sheets**: La app solo lee dos libros externos: vehículos y órdenes de trabajo.
+- **Informes**: Se conectará más adelante un libro nuevo que leerá Supabase; no forma parte de la app operativa.
 - **La aplicación web**: Lee y escribe en Supabase, no en Sheets.
 - **Si Supabase no funciona**: La app no inicia. No hay fallback a Sheets.
 
@@ -67,27 +68,15 @@ Deberías ver:
 
 Si falla:
 - Verifica que `.streamlit/secrets.toml` tenga los datos de Supabase.
-- Verifica que Google Sheets esté compartido con `planilla-inventario@inventario-505919.iam.gserviceaccount.com`.
+- Verifica que los dos libros de lectura estén compartidos con el `client_email` de la cuenta de servicio.
 
-## 4. Sincronización a Google Sheets (opcional)
-
-Para mantener Google Sheets actualizado como respaldo/informes:
-
-```bash
-python sync_supabase_to_gsheet.py
-```
-
-Esto copia los datos desde Supabase hacia Sheets (BASE_DATOS_REMITOS, STOCK_PRODUCTOS, etc.).
-
-Puedes ejecutar este script periódicamente para mantener Sheets sincronizado, pero **NO es obligatorio para el funcionamiento de la app**.
-
-## 5. Verificación
+## 4. Verificación
 
 1. Abre la app en Streamlit Cloud.
 2. Prueba agregar un remito o actualizar stock.
 3. En Supabase > **Table Editor**, verifica que los datos aparezcan en tiempo real.
 
-## 6. Ante errores
+## 5. Ante errores
 
 Si la app dice:  
 ```

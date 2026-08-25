@@ -177,8 +177,11 @@ def run_sync_to_gsheet() -> bool:
         gs_client = gspread.authorize(creds)
         
         # IDs de los Google Sheets
-        inv_id = st.secrets.get("GSHEET_INVENTARIO_ID", "1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg")
-        gsheets_inventario = gs_client.open_by_key(inv_id)
+        reportes_id = st.secrets.get("GSHEET_REPORTES_ID", "")
+        if not reportes_id:
+            print("✗ No hay GSHEET_REPORTES_ID configurado; el libro de informes aún no existe.")
+            return False
+        gsheets_inventario = gs_client.open_by_key(reportes_id)
         
     except Exception as exc:
         print(f"✗ No se pudo conectar a Google Sheets: {exc}")

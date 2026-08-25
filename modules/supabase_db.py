@@ -1089,9 +1089,5 @@ class DatabaseManagerSupabase:
 
 @st.cache_resource(show_spinner=False)
 def get_db():
-    """Retorna DatabaseManager: Supabase si está configurado, sino Google Sheets (fallback)."""
-    if supabase_configured():
-        return DatabaseManagerSupabase()
-    else:
-        from modules.gsheets_db import DatabaseManager as OldDatabaseManager
-        return OldDatabaseManager()
+    """Retorna el backend operativo; Supabase es obligatorio."""
+    return DatabaseManagerSupabase()

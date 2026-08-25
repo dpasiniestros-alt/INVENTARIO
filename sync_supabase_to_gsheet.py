@@ -29,8 +29,8 @@ if os.path.exists(secrets_path):
             if "gcp_service_account" in secrets:
                 os.environ["GCP_SERVICE_ACCOUNT"] = json.dumps(secrets["gcp_service_account"])
             
-            if "GSHEET_INVENTARIO_ID" in secrets:
-                os.environ["GSHEET_INVENTARIO_ID"] = secrets["GSHEET_INVENTARIO_ID"]
+            if "GSHEET_REPORTES_ID" in secrets:
+                os.environ["GSHEET_REPORTES_ID"] = secrets["GSHEET_REPORTES_ID"]
     except Exception as e:
         print(f"✗ Error leyendo {secrets_path}: {e}")
         sys.exit(1)
@@ -65,7 +65,7 @@ class FakeSecrets:
 fake_secrets_data = {
     "SUPABASE_URL": os.environ.get("SUPABASE_URL", ""),
     "SUPABASE_SERVICE_ROLE_KEY": os.environ.get("SUPABASE_SERVICE_ROLE_KEY", ""),
-    "GSHEET_INVENTARIO_ID": os.environ.get("GSHEET_INVENTARIO_ID", "1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg"),
+    "GSHEET_REPORTES_ID": os.environ.get("GSHEET_REPORTES_ID", ""),
 }
 
 if "GCP_SERVICE_ACCOUNT" in os.environ:

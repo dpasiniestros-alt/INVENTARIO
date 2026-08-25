@@ -90,10 +90,7 @@ class DatabaseManager:
                 import gspread
                 from google.oauth2.service_account import Credentials
 
-                scopes = [
-                    "https://www.googleapis.com/auth/spreadsheets",
-                    "https://www.googleapis.com/auth/drive"
-                ]
+                scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
                 creds_dict = dict(st.secrets["gcp_service_account"])
                 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
                 self.client = gspread.authorize(creds)
@@ -103,25 +100,17 @@ class DatabaseManager:
                     try:
                         self.spreadsheet_vehiculos = self.client.open_by_key(veh_id)
                     except Exception as exc:
-                        log_exception("gsheets", f"No se pudo abrir la hoja {sheet_name}", exc)
+                        log_exception("gsheets", f"No se pudo abrir el libro de vehículos {veh_id}", exc)
                         pass
 
-                inv_id = safe_secret("GSHEET_INVENTARIO_ID", "1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg")
-                if inv_id:
-                    try:
-                        self.spreadsheet_inventario = self.client.open_by_key(inv_id)
-                    except Exception as exc:
-                        log_exception("gsheets", f"No se pudo abrir la hoja de órdenes {sname}", exc)
-                        pass
-
-                ord_id = safe_secret("GSHEET_ORDENES_ID", "1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY")
+                ord_id = safe_secret("GSHEET_ORDENES_ID")
                 if ord_id:
                     try:
                         self.spreadsheet_ordenes = self.client.open_by_key(ord_id)
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        log_exception("gsheets", f"No se pudo abrir el libro de órdenes {ord_id}", exc)
 
-                if self.spreadsheet_vehiculos or self.spreadsheet_inventario or self.spreadsheet_ordenes:
+                if self.spreadsheet_vehiculos or self.spreadsheet_ordenes:
                     self.is_connected_gsheets = True
         except Exception:
             self.is_connected_gsheets = False
@@ -496,12 +485,20 @@ class DatabaseManager:
         spreadsheets = [sheet for sheet in [self.spreadsheet_ordenes, self.spreadsheet_vehiculos] if sheet]
         if self.is_connected_gsheets and spreadsheets:
             for spreadsheet in spreadsheets:
-                for sname in ["COORDINACION DE ENVIO A TALLER", "Ordenes_Taller", "Solicitudes_Taller"]:
+                for sname in ["COORDINACION DE ENVIO A TALLER"]:
                     try:
                         sheet = spreadsheet.worksheet(sname)
-                        data = sheet.get_all_records()
-                        if data:
-                            df = pd.DataFrame(data)
+                        values = sheet.get_all_values()
+                        if len(values) > 1:
+                            headers = [str(value).strip() for value in values[0]]
+                            rows = []
+                            for values_row in values[1:]:
+                                padded = list(values_row) + [""] * max(0, len(headers) - len(values_row))
+                                rows.append(padded[:len(headers)])
+                            df = pd.DataFrame(rows, columns=headers)
+                            # El número de OT está definido por la columna Q del libro.
+                            if len(df.columns) >= 17:
+                                df["Nro_OT"] = df.iloc[:, 16].astype(str)
                             break
                     except Exception:
                         pass

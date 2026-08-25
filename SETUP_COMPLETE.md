@@ -4,20 +4,19 @@
 
 ### 1. **Credenciales de Google Cloud** ✅
 - Archivo: [.streamlit/secrets.toml](.streamlit/secrets.toml)
-- ✓ Agregada credencial de `planilla-inventario@inventario-505919.iam.gserviceaccount.com`
+- ⏳ Falta configurar la credencial de la nueva cuenta de servicio
 - ✓ Credencial protegida en `.gitignore` (no se subirá a GitHub)
 
-### 2. **Google Sheets Configurados** ✅
+### 2. **Google Sheets de solo lectura** ✅
 ```
 GSHEET_VEHICULOS_ID = "1ZLxa6UaMNJ8irgTUNqPhLr2qENyMLwXnJY8B-y0UlVU"
-GSHEET_INVENTARIO_ID = "1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg"
 GSHEET_ORDENES_ID = "1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY"
 ```
 
 ### 3. **Código Actualizado** ✅
 - Archivo: [modules/gsheets_db.py](modules/gsheets_db.py)
 - ✓ Agregado soporte para Sheet de "Órdenes de Trabajo"
-- ✓ Ahora conecta automáticamente con los 3 Sheets
+- ✓ Solo consulta los libros de vehículos y órdenes de trabajo
 
 ### 4. **Protección de Secretos** ✅
 - Archivo: [.gitignore](.gitignore)
@@ -28,25 +27,24 @@ GSHEET_ORDENES_ID = "1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY"
 
 ## ⚠️ PASO CRÍTICO: Compartir Google Sheets
 
-Antes de desplegar en la nube, **DEBE compartir cada Sheet** con la cuenta de servicio:
+Antes de desplegar en la nube, **DEBE compartir los dos libros de lectura** con la nueva cuenta de servicio:
 
 1. Ve a cada Google Sheet:
-   - [Vehículos/Flota](https://docs.google.com/spreadsheets/d/1ZLxa6UaMNJ8irgTUNqPhLr2qENyMLwXnJY8B-y0UlVU/)
-   - [Inventario/Remitos](https://docs.google.com/spreadsheets/d/1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg/)
-   - [Órdenes de Trabajo](https://docs.google.com/spreadsheets/d/1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY/)
+   - Vehículos/Flota: `ID_DEL_LIBRO_DE_VEHICULOS`
+   - Órdenes de Trabajo: `ID_DEL_LIBRO_DE_ORDENES`
 
 2. Haz clic en **Compartir** (arriba a la derecha)
 
 3. Pega este email:
    ```
-   planilla-inventario@inventario-505919.iam.gserviceaccount.com
+   EMAIL_DE_LA_NUEVA_CUENTA_DE_SERVICIO
    ```
 
-4. Dale permisos de **Editor**
+4. Dale permisos de **Lector**
 
 5. Haz clic en **Compartir**
 
-**Repite para los 3 Sheets.**
+**Repite para los 2 libros de lectura.**
 
 ---
 
@@ -100,13 +98,12 @@ git push -u origin main
 | Variable | Valor |
 |----------|-------|
 | `GSHEET_VEHICULOS_ID` | `1ZLxa6UaMNJ8irgTUNqPhLr2qENyMLwXnJY8B-y0UlVU` |
-| `GSHEET_INVENTARIO_ID` | `1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg` |
 | `GSHEET_ORDENES_ID` | `1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY` |
 
 ### Cuenta de Servicio
 | Campo | Valor |
 |-------|-------|
-| **Email** | `planilla-inventario@inventario-505919.iam.gserviceaccount.com` |
+| **Email** | `EMAIL_DE_LA_NUEVA_CUENTA_DE_SERVICIO` |
 | **Project ID** | `inventario-505919` |
 | **Permiso requerido** | Editor en cada Google Sheet |
 
@@ -133,7 +130,7 @@ git push -u origin main
 ## 📋 Checklist Final
 
 - [ ] Leí toda esta guía
-- [ ] Compartí los 3 Google Sheets con `planilla-inventario@inventario-505919.iam.gserviceaccount.com`
+- [ ] Compartí los 2 libros de lectura con la nueva cuenta de servicio
 - [ ] Creé cuenta en GitHub (si no tenía)
 - [ ] Subí el código a GitHub
 - [ ] Creé cuenta en Streamlit Cloud
