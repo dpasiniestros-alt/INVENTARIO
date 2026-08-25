@@ -506,7 +506,7 @@ class DatabaseManager:
                     break
 
         if df is None:
-            df = pd.DataFrame()
+            df = pd.DataFrame(columns=["Nro_OT", "Descripcion_Trabajo", "Patente", "Estado", "Gerencia", "Fecha"])
 
         cols_norm = {}
         for c in df.columns:
@@ -1080,7 +1080,8 @@ def get_db():
                 return pd.DataFrame(columns=["nombre", "email", "gerencia"])
 
             def get_vehiculos(self, solo_activos=True):
-                return pd.DataFrame()
+                df = pd.DataFrame(columns=["PATENTE", "AÑO", "MARCA", "MODELO", "GERENCIA", "STATUS", "FECHA DE BAJA", "ETIQUETA_COMPLETA"])
+                return df
 
             def get_responsables(self):
                 try:
@@ -1118,7 +1119,7 @@ def get_db():
                 return []
 
             def get_ordenes_taller(self, *a, **kw):
-                return pd.DataFrame()
+                return pd.DataFrame(columns=["Nro_OT", "Descripcion_Trabajo", "Patente", "Estado", "Gerencia", "Fecha"])
 
             def get_email_config(self):
                 return {
