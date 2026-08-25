@@ -18,50 +18,12 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 def safe_secret(key, default=""):
-    keys_to_try = [key, key.upper(), key.lower()]
     try:
-        if hasattr(st, "secrets") and st.secrets:
-            for candidate in keys_to_try:
-                if candidate in st.secrets:
-                    return st.secrets[candidate]
-            if hasattr(st.secrets, "get"):
-                nested = st.secrets.get("gcp_service_account")
-                if isinstance(nested, dict) and key in nested:
-                    return nested[key]
+        if hasattr(st, "secrets") and key in st.secrets:
+            return st.secrets[key]
     except Exception:
         pass
-    for candidate in keys_to_try:
-        value = os.environ.get(candidate)
-        if value not in (None, ""):
-            return value
     return default
-
-
-def _load_gcp_service_account():
-    try:
-        if hasattr(st, "secrets") and st.secrets:
-            nested = st.secrets.get("gcp_service_account") if hasattr(st.secrets, "get") else None
-            if isinstance(nested, dict) and nested:
-                return dict(nested)
-            if "gcp_service_account" in st.secrets:
-                value = st.secrets["gcp_service_account"]
-                if isinstance(value, dict):
-                    return dict(value)
-                if isinstance(value, str):
-                    return json.loads(value)
-        env_value = os.environ.get("GCP_SERVICE_ACCOUNT") or os.environ.get("GOOGLE_SERVICE_ACCOUNT")
-        if env_value:
-            try:
-                return json.loads(env_value)
-            except Exception:
-                return None
-        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
-        if creds_path and os.path.exists(creds_path):
-            with open(creds_path, "r", encoding="utf-8") as fh:
-                return json.load(fh)
-    except Exception:
-        pass
-    return None
 
 class DatabaseManager:
     def __init__(self):
@@ -124,51 +86,45 @@ class DatabaseManager:
 
     def _init_connection(self):
         try:
-            creds_dict = _load_gcp_service_account()
-            if not creds_dict:
-                self.is_connected_gsheets = False
-                print("Google Sheets: no hay credenciales GCP/Service Account cargadas (Secrets / env).")
-                return
+            if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
+                import gspread
+                from google.oauth2.service_account import Credentials
 
-            import gspread
-            from google.oauth2.service_account import Credentials
+                scopes = [
+                    "https://www.googleapis.com/auth/spreadsheets",
+                    "https://www.googleapis.com/auth/drive"
+                ]
+                creds_dict = dict(st.secrets["gcp_service_account"])
+                creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+                self.client = gspread.authorize(creds)
+                
+                veh_id = safe_secret("GSHEET_VEHICULOS_ID", "1ZLxa6UaMNJ8irgTUNqPhLr2qENyMLwXnJY8B-y0UlVU")
+                if veh_id:
+                    try:
+                        self.spreadsheet_vehiculos = self.client.open_by_key(veh_id)
+                    except Exception as exc:
+                        log_exception("gsheets", f"No se pudo abrir la hoja {sheet_name}", exc)
+                        pass
 
-            scopes = [
-                "https://www.googleapis.com/auth/spreadsheets",
-                "https://www.googleapis.com/auth/drive"
-            ]
-            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-            self.client = gspread.authorize(creds)
+                inv_id = safe_secret("GSHEET_INVENTARIO_ID", "1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg")
+                if inv_id:
+                    try:
+                        self.spreadsheet_inventario = self.client.open_by_key(inv_id)
+                    except Exception as exc:
+                        log_exception("gsheets", f"No se pudo abrir la hoja de órdenes {sname}", exc)
+                        pass
 
-            veh_id = safe_secret("GSHEET_VEHICULOS_ID", "1ZLxa6UaMNJ8irgTUNqPhLr2qENyMLwXnJY8B-y0UlVU")
-            if veh_id:
-                try:
-                    self.spreadsheet_vehiculos = self.client.open_by_key(veh_id)
-                except Exception as exc:
-                    log_exception("gsheets", "No se pudo abrir la hoja VEHICULOS", exc)
+                ord_id = safe_secret("GSHEET_ORDENES_ID", "1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY")
+                if ord_id:
+                    try:
+                        self.spreadsheet_ordenes = self.client.open_by_key(ord_id)
+                    except Exception:
+                        pass
 
-            inv_id = safe_secret("GSHEET_INVENTARIO_ID", "1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg")
-            if inv_id:
-                try:
-                    self.spreadsheet_inventario = self.client.open_by_key(inv_id)
-                except Exception as exc:
-                    log_exception("gsheets", "No se pudo abrir la hoja de inventario", exc)
-
-            ord_id = safe_secret("GSHEET_ORDENES_ID", "1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY")
-            if ord_id:
-                try:
-                    self.spreadsheet_ordenes = self.client.open_by_key(ord_id)
-                except Exception as exc:
-                    log_exception("gsheets", "No se pudo abrir la hoja de órdenes", exc)
-
-            if self.spreadsheet_vehiculos or self.spreadsheet_inventario or self.spreadsheet_ordenes:
-                self.is_connected_gsheets = True
-            else:
-                self.is_connected_gsheets = False
-                print("Google Sheets: no se pudo abrir ningún libro con los IDs configurados.")
-        except Exception as exc:
+                if self.spreadsheet_vehiculos or self.spreadsheet_inventario or self.spreadsheet_ordenes:
+                    self.is_connected_gsheets = True
+        except Exception:
             self.is_connected_gsheets = False
-            log_exception("gsheets", "Error inicializando conexión con Google Sheets", exc)
 
     def _init_local_backup(self):
         return
@@ -1096,16 +1052,94 @@ class DatabaseManager:
 
 @st.cache_resource(show_spinner=False)
 def get_db():
-    """Retorna DatabaseManager usando Supabase como backend (SIN fallback a Google Sheets)."""
+    """Retorna DatabaseManager usando Supabase como backend.
+
+    Si Supabase no está configurado en Streamlit Secrets, en lugar de lanzar
+    una excepción que tumba la app, devolvemos un objeto "DisabledDB" con
+    comportamiento seguro: lecturas devuelven estructuras vacías y escrituras
+    fallan con un mensaje claro en `last_error`. Esto facilita que la UI
+    muestre una advertencia y que el administrador corrija la configuración
+    desde la interfaz sin que la app deje de funcionar.
+    """
     from modules.supabase_client import supabase_configured
-    
+
     if not supabase_configured():
-        raise RuntimeError(
-            "⚠️ Supabase no está configurado. Verifica los Secrets en Streamlit Cloud:\n"
-            "- SUPABASE_URL\n"
-            "- SUPABASE_SERVICE_ROLE_KEY\n\n"
-            "Si esto persiste, llama al técnico."
-        )
-    
+        # Retornar un DB de solo-lectura/seguro que informa que falta configurar Supabase
+        import pandas as pd
+        from modules.catalog_seed import RESPONSABLES_INICIALES
+
+        class DisabledDB:
+            def __init__(self):
+                self.last_error = (
+                    "Supabase no está configurado. Configure SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY "
+                    "en Streamlit Secrets para habilitar la persistencia en la nube."
+                )
+                self.is_connected_gsheets = False
+
+            def get_productos(self):
+                return pd.DataFrame(columns=["ID", "Categoria", "Marca", "Modelo_Detalle", "Codigo_Pieza", "Stock_Actual", "Stock_Minimo", "Unidad", "Requiere_Serial"]) 
+
+            def get_receptores(self):
+                return pd.DataFrame(columns=["nombre", "email", "gerencia"])
+
+            def get_vehiculos(self, solo_activos=True):
+                return pd.DataFrame()
+
+            def get_responsables(self):
+                try:
+                    return pd.DataFrame(RESPONSABLES_INICIALES)
+                except Exception:
+                    return pd.DataFrame(columns=["nombre", "pin"]) 
+
+            def get_unidades_seriales(self):
+                return []
+
+            def get_unidades_disponibles(self, *a, **kw):
+                return []
+
+            def get_unidades_en_vehiculo(self, *a, **kw):
+                return []
+
+            def get_ordenes_taller(self, *a, **kw):
+                return pd.DataFrame()
+
+            def get_remitos(self):
+                return pd.DataFrame()
+
+            def get_remito_items(self, nro_remito: str = None):
+                return pd.DataFrame()
+
+            def get_proximo_numero_remito(self, tipo: str) -> str:
+                prefix = "REM-S"
+                if "ENTRADA" in tipo.upper():
+                    prefix = "REM-E"
+                if "TRASPASO" in tipo.upper():
+                    prefix = "REM-T"
+                return f"{prefix}-0001"
+
+            # Escrituras: indican fallo y dejan last_error claro
+            def guardar_remito(self, *a, **kw):
+                self.last_error = (
+                    "Imposible guardar remito: Supabase no está configurado. "
+                    "Agregue SUPABASE_URL y SUPABASE_SERVICE_ROLE_KEY en Streamlit Secrets."
+                )
+                return False
+
+            def save_productos(self, *a, **kw):
+                self.last_error = "Imposible guardar productos: Supabase no está configurado."
+                return False
+
+            def subir_archivo_a_drive(self, archivo_bytes, nombre_archivo: str, carpeta_id: str = None) -> str:
+                self.last_error = "Drive no configurado (gcp_service_account faltante en secrets)."
+                return ""
+
+            def actualizar_link_pdf(self, *a, **kw):
+                return False
+
+            def mark_remito_email_sent(self, *a, **kw):
+                return False
+
+        return DisabledDB()
+
     from modules.supabase_db import DatabaseManagerSupabase
     return DatabaseManagerSupabase()
