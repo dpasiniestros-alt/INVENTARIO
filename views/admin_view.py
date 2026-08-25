@@ -198,7 +198,7 @@ def render_admin_view():
             veh_id = getattr(db.spreadsheet_vehiculos, "id", "desconocido")
             st.success(f"🟢 Conectado a Google Sheets. Inventario: {inv_id} | Flota (solo lectura): {veh_id}")
         else:
-            st.info("🟡 Google Sheets no está conectado en esta instancia. La app está usando Supabase como backend principal; si no hay credenciales de Drive válidas, los PDFs se guardan en Supabase Storage.")
+            st.info("🟡 Google Sheets no está conectado en esta instancia. La app usa Supabase como backend principal y Supabase Storage para PDFs/evidencias. Drive es opcional y no es obligatorio.")
 
         email_cfg = {}
         if hasattr(st, "secrets") and "email" in st.secrets:

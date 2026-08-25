@@ -82,6 +82,21 @@ def _google_drive_credentials_available() -> bool:
         return False
 
 
+def _drive_upload_enabled() -> bool:
+    """Drive es opcional; por defecto el archivo va a Supabase Storage."""
+    try:
+        if not hasattr(st, "secrets"):
+            return False
+        if isinstance(st.secrets, dict):
+            for key in ("USE_GOOGLE_DRIVE", "ENABLE_DRIVE_UPLOAD", "ENABLE_GOOGLE_DRIVE"):
+                val = st.secrets.get(key)
+                if val is not None:
+                    return bool(val)
+        return False
+    except Exception:
+        return False
+
+
 def now_local() -> datetime.datetime:
     return datetime.datetime.now(APP_TIMEZONE)
 
@@ -931,14 +946,14 @@ class DatabaseManagerSupabase:
         """
         carpeta_destino = carpeta_id or _get_drive_folder_id()
 
-        # Intento 1: Drive solo cuando las credenciales reales están presentes y válidas.
+        # Drive queda como opción explícita. Por defecto los PDFs se guardan en Supabase Storage.
         try:
             from io import BytesIO
             from google.oauth2.service_account import Credentials
             from googleapiclient.discovery import build
             from googleapiclient.http import MediaIoBaseUpload
 
-            if _google_drive_credentials_available():
+            if _drive_upload_enabled() and _google_drive_credentials_available():
                 sa_info = dict(st.secrets["gcp_service_account"])
                 private_key = str(sa_info.get("private_key") or "")
                 if not private_key or "BEGIN PRIVATE KEY" not in private_key:
@@ -967,7 +982,7 @@ class DatabaseManagerSupabase:
             log_exception("drive", f"Error subiendo {nombre_archivo} a Drive", exc)
             self.last_error = f"Drive: {exc}"
 
-        # Fallback: Supabase Storage
+        # Fallback principal: Supabase Storage
         try:
             if not self.client:
                 self.last_error = "Supabase client no disponible para almacenar archivo."
