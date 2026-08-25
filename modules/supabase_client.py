@@ -2,19 +2,40 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import streamlit as st
 
 
+def _coalesce(*values):
+    for value in values:
+        if value is not None and str(value).strip() not in ("", "None"):
+            return value
+    return ""
+
+
 def _secret(name: str, default: str = "") -> str:
+    value = default
     try:
-        value = st.secrets.get(name)
-        if value is None:
-            supabase_secrets = st.secrets.get("supabase", {})
-            value = supabase_secrets.get(name, default)
+        if hasattr(st, "secrets"):
+            value = _coalesce(st.secrets.get(name), st.secrets.get(name.lower()), st.secrets.get(name.upper()))
+            if value == "":
+                supabase_secrets = st.secrets.get("supabase", {})
+                if isinstance(supabase_secrets, dict):
+                    value = _coalesce(supabase_secrets.get(name), supabase_secrets.get(name.lower()), supabase_secrets.get(name.upper()))
     except Exception:
         value = default
+
+    if value == "":
+        value = _coalesce(
+            os.getenv(name),
+            os.getenv(name.upper()),
+            os.getenv(name.lower()),
+            os.getenv(f"STREAMLIT_SECRET_{name.upper()}"),
+            os.getenv(f"STREAMLIT_SECRET_{name.lower()}"),
+        )
+
     return str(value or "").strip()
 
 

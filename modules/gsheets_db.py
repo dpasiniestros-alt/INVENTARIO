@@ -19,11 +19,44 @@ os.makedirs(DATA_DIR, exist_ok=True)
 
 def safe_secret(key, default=""):
     try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            return st.secrets[key]
+        if hasattr(st, "secrets"):
+            if key in st.secrets:
+                return st.secrets[key]
+            if key.lower() in st.secrets:
+                return st.secrets[key.lower()]
+            upper_key = key.upper()
+            if upper_key in st.secrets:
+                return st.secrets[upper_key]
     except Exception:
         pass
+
+    import os
+    value = os.getenv(key) or os.getenv(key.upper()) or os.getenv(key.lower())
+    if value not in (None, ""):
+        return value
+
+    env_aliases = [
+        f"STREAMLIT_SECRET_{key.upper()}",
+        f"STREAMLIT_SECRET_{key.lower()}",
+    ]
+    for alias in env_aliases:
+        env_value = os.getenv(alias)
+        if env_value not in (None, ""):
+            return env_value
+
     return default
+
+
+def safe_secret_json(key, default=None):
+    value = safe_secret(key, default)
+    if isinstance(value, str):
+        try:
+            import json
+            return json.loads(value)
+        except Exception:
+            return value
+    return value
+
 
 class DatabaseManager:
     def __init__(self):
@@ -86,15 +119,24 @@ class DatabaseManager:
 
     def _init_connection(self):
         try:
+            creds_dict = None
             if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
+                creds_dict = dict(st.secrets["gcp_service_account"])
+            if creds_dict is None:
+                env_creds = safe_secret_json("gcp_service_account")
+                if isinstance(env_creds, dict):
+                    creds_dict = env_creds
+                elif isinstance(env_creds, str):
+                    creds_dict = json.loads(env_creds)
+
+            if creds_dict:
                 import gspread
                 from google.oauth2.service_account import Credentials
 
                 scopes = ["https://www.googleapis.com/auth/spreadsheets.readonly"]
-                creds_dict = dict(st.secrets["gcp_service_account"])
                 creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
                 self.client = gspread.authorize(creds)
-                
+
                 veh_id = safe_secret("GSHEET_VEHICULOS_ID", "1ZLxa6UaMNJ8irgTUNqPhLr2qENyMLwXnJY8B-y0UlVU")
                 if veh_id:
                     try:
