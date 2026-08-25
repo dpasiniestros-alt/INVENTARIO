@@ -210,7 +210,7 @@ def render_remito_view():
     
     df_prod = db.get_productos()
     if df_prod.empty:
-        st.warning("No hay productos disponibles en STOCK_PRODUCTOS. Verifique la conexión con Google Sheets.")
+        st.warning("No hay productos cargados en la base de datos. Verifique la conexión con Supabase o cargue el catálogo inicial.")
         return
     if es_salida:
         categorias_disponibles = sorted(

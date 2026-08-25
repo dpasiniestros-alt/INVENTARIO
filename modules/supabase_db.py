@@ -171,7 +171,17 @@ class DatabaseManagerSupabase:
             return pd.DataFrame(columns=columnas_sql)
 
         df = self._safe_execute(fetch, pd.DataFrame(columns=columnas_sql))
-        
+
+        if df.empty:
+            try:
+                initial = pd.DataFrame(get_initial_products())
+                if not initial.empty:
+                    self.save_productos(initial)
+                    df = initial.copy()
+            except Exception as exc:
+                log_exception("supabase", "Error sembrando catálogo inicial de productos", exc)
+                df = pd.DataFrame(columns=columnas_sql)
+         
         if not df.empty:
             df = df.rename(columns=dict(zip(columnas_sql, columnas_vista)))
 
