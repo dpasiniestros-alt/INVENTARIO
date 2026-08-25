@@ -4,6 +4,7 @@ Vista Principal de Creacion de Remitos (Entrada, Salida y Traspaso) con Trazabil
 """
 
 import datetime
+import pandas as pd
 from PIL import Image as PILImage
 import streamlit as st
 from streamlit_drawable_canvas import st_canvas
@@ -16,6 +17,24 @@ from modules.catalog_seed import (
 from modules.pdf_generator import generate_remito_pdf, get_pdf_bytes
 from modules.email_sender import send_remito_email
 from modules.supabase_db import now_local
+
+
+def _first_column(df, *candidates):
+    if df is None or not hasattr(df, "columns"):
+        return None
+    for name in candidates:
+        if name in df.columns:
+            return name
+    return df.columns[0] if len(df.columns) else None
+
+
+def _safe_value(row, *candidates, default=""):
+    for name in candidates:
+        if name in row.index:
+            value = row.get(name)
+            if value is not None and str(value).strip() not in {"", "nan", "None"}:
+                return value
+    return default
 
 
 def _reset_remito_form():
@@ -99,7 +118,11 @@ def render_remito_view():
         tipo_str = "ENTRADA"
 
     df_veh = db.get_vehiculos(solo_activos=True)
-    lista_veh_etiquetas = sorted(df_veh["ETIQUETA_COMPLETA"].dropna().unique().tolist()) if not df_veh.empty else []
+    veh_label_col = _first_column(df_veh, "ETIQUETA_COMPLETA", "ETIQUETA", "Patente", "PATENTE", "Vehiculo")
+    if veh_label_col is not None and not df_veh.empty:
+        lista_veh_etiquetas = sorted(df_veh[veh_label_col].dropna().astype(str).str.strip().unique().tolist())
+    else:
+        lista_veh_etiquetas = []
 
     # 2. RESPONSABLE DE TALLER
     responsable_final = str(st.session_state.get("current_user", "")).strip()
@@ -212,26 +235,37 @@ def render_remito_view():
     if df_prod.empty:
         st.warning("No hay productos disponibles en STOCK_PRODUCTOS. Verifique la conexión con Google Sheets.")
         return
+
+    stock_col = _first_column(df_prod, "Stock_Actual", "stock_actual", "stock")
+    cat_col = _first_column(df_prod, "Categoria", "categoria")
+    id_col = _first_column(df_prod, "ID", "id")
+    marca_col = _first_column(df_prod, "Marca", "marca")
+    modelo_col = _first_column(df_prod, "Modelo_Detalle", "modelo", "Descripcion", "descripcion")
+    codigo_col = _first_column(df_prod, "Codigo_Pieza", "codigo_pieza", "Codigo")
+
+    if stock_col is not None and stock_col in df_prod.columns:
+        df_prod[stock_col] = pd.to_numeric(df_prod[stock_col], errors="coerce").fillna(0)
+
     if es_salida:
         categorias_disponibles = sorted(
-            df_prod.loc[df_prod["Stock_Actual"] > 0, "Categoria"].unique().tolist()
-        )
+            df_prod.loc[df_prod[stock_col] > 0, cat_col].dropna().astype(str).unique().tolist()
+        ) if stock_col and cat_col else []
     else:
-        categorias_disponibles = sorted(df_prod["Categoria"].unique().tolist()) if not df_prod.empty else []
+        categorias_disponibles = sorted(df_prod[cat_col].dropna().astype(str).unique().tolist()) if cat_col else []
 
     with st.expander("➕ Agregar Artículo al Remito", expanded=True):
         cat_sel = st.selectbox("Categoría de Artículo:", categorias_disponibles)
         
-        df_cat_all = df_prod[df_prod["Categoria"] == cat_sel]
+        df_cat_all = df_prod[df_prod[cat_col].astype(str) == str(cat_sel)] if cat_col else df_prod.iloc[0:0]
         df_cat = df_cat_all.copy()
         unidades_origen = db.get_unidades_en_vehiculo(veh_origen_final) if es_traspaso and veh_origen_final else []
         if es_traspaso and unidades_origen:
             ids_origen = {str(unit.get("ID_Producto", "")) for unit in unidades_origen}
-            df_cat_origen = df_cat[df_cat["ID"].astype(str).isin(ids_origen)]
+            df_cat_origen = df_cat[df_cat[id_col].astype(str).isin(ids_origen)] if id_col else df_cat.iloc[0:0]
             if not df_cat_origen.empty:
                 df_cat = df_cat_origen
-        if es_salida:
-            df_cat = df_cat[df_cat["Stock_Actual"] > 0]
+        if es_salida and stock_col is not None:
+            df_cat = df_cat[df_cat[stock_col] > 0]
 
         modo_item = "Existente en Catálogo"
         if es_entrada:
@@ -244,21 +278,26 @@ def render_remito_view():
                 prod_dict = {}
                 opciones_prod = []
                 for _, p in df_cat.iterrows():
+                    prod_id = _safe_value(p, id_col, "ID", default="")
+                    prod_marca = _safe_value(p, marca_col, "Marca", default="")
+                    prod_modelo = _safe_value(p, modelo_col, "Modelo_Detalle", default="")
+                    prod_codigo = _safe_value(p, codigo_col, "Codigo_Pieza", default="-")
+                    prod_stock = int(_safe_value(p, stock_col, "Stock_Actual", default=0) or 0)
                     cantidad_carrito = sum(
                         int(item.get("Cantidad", 0))
                         for item in st.session_state["cart_items"]
-                        if str(item.get("ID_Producto", "")) == str(p.get("ID", ""))
+                        if str(item.get("ID_Producto", "")) == str(prod_id)
                     )
-                    stock_disponible = max(0, int(p["Stock_Actual"]) - cantidad_carrito) if es_salida else int(p["Stock_Actual"])
+                    stock_disponible = max(0, prod_stock - cantidad_carrito) if es_salida else prod_stock
                     ya_en_carrito = cantidad_carrito > 0
                     if es_salida and stock_disponible <= 0 and not ya_en_carrito:
                         continue
                     stock_txt = f"(Stock: {stock_disponible})"
                     if ya_en_carrito:
                         stock_txt += f" | En carrito: {cantidad_carrito}"
-                    lbl = f"{p['Marca']} | {p['Modelo_Detalle']} {stock_txt}"
-                    if p.get("Codigo_Pieza") and p.get("Codigo_Pieza") != "-":
-                        lbl += f" [{p['Codigo_Pieza']}]"
+                    lbl = f"{prod_marca} | {prod_modelo} {stock_txt}"
+                    if prod_codigo and prod_codigo != "-":
+                        lbl += f" [{prod_codigo}]"
                     opciones_prod.append(lbl)
                     prod_dict[lbl] = p
 
@@ -272,22 +311,24 @@ def render_remito_view():
                     p_selected = None
                     if productos_carrito:
                         producto_id_carrito = str(productos_carrito[0].get("ID_Producto", ""))
-                        filas_carrito = df_cat_all[df_cat_all["ID"].astype(str) == producto_id_carrito]
-                        if not filas_carrito.empty:
-                            p_selected = filas_carrito.iloc[0]
+                        if id_col:
+                            filas_carrito = df_cat_all[df_cat_all[id_col].astype(str) == producto_id_carrito]
+                            if not filas_carrito.empty:
+                                p_selected = filas_carrito.iloc[0]
                 else:
                     prod_sel_lbl = st.selectbox("Seleccione Producto:", opciones_prod)
                     p_selected = prod_dict.get(prod_sel_lbl)
                 if p_selected is None:
                     st.info("Seleccione otra categoría para agregar artículos o continúe con el carrito.")
                     st.stop()
-                item_key = str(p_selected.get("ID", cat_sel)).replace(" ", "_")
+                item_key = str(p_selected.get(id_col if id_col else "ID", cat_sel)).replace(" ", "_")
                 cantidad_carrito = sum(
                     int(item.get("Cantidad", 0))
                     for item in st.session_state["cart_items"]
-                    if str(item.get("ID_Producto", "")) == str(p_selected.get("ID", ""))
+                    if str(item.get("ID_Producto", "")) == str(p_selected.get(id_col if id_col else "ID", ""))
                 )
-                stock_disponible = max(0, int(p_selected["Stock_Actual"]) - cantidad_carrito) if es_salida else int(p_selected["Stock_Actual"])
+                stock_actual_value = int(p_selected.get(stock_col if stock_col else "Stock_Actual", 0) or 0)
+                stock_disponible = max(0, stock_actual_value - cantidad_carrito) if es_salida else stock_actual_value
                 puede_agregar = not es_salida or stock_disponible > 0
 
                 if cat_sel in ["BATERIA", "NEUMATICO"]:
@@ -297,19 +338,21 @@ def render_remito_view():
                         cantidad_carrito = sum(
                             int(item.get("Cantidad", 0))
                             for item in st.session_state["cart_items"]
-                            if str(item.get("ID_Producto", "")) == str(p_selected.get("ID", ""))
+                            if str(item.get("ID_Producto", "")) == str(p_selected.get(id_col if id_col else "ID", ""))
                         )
-                        stock_disponible = max(0, int(p_selected["Stock_Actual"]) - cantidad_carrito)
+                        stock_disponible = max(0, stock_actual_value - cantidad_carrito)
                         seriales_en_carrito = {
                             serial.strip().upper()
                             for item in st.session_state["cart_items"]
-                            if str(item.get("ID_Producto", "")) == str(p_selected.get("ID", ""))
+                            if str(item.get("ID_Producto", "")) == str(p_selected.get(id_col if id_col else "ID", ""))
                             for serial in str(item.get("Nro_Serie_Bateria_Neumatico", "")).split(",")
                             if serial.strip() and serial.strip() != "-"
                         }
                         nums_disponibles = [
                             numero for numero in db.get_unidades_disponibles(
-                                cat_sel, marca=p_selected["Marca"], modelo=p_selected["Modelo_Detalle"]
+                                cat_sel,
+                                marca=p_selected.get(marca_col if marca_col else "Marca", ""),
+                                modelo=p_selected.get(modelo_col if modelo_col else "Modelo_Detalle", "")
                             ) if not str(numero).upper().startswith("SIN_MARCAR-")
                             and str(numero).upper() not in seriales_en_carrito
                         ]
@@ -362,7 +405,7 @@ def render_remito_view():
                 else:
                     # Otros articulos
                     item_key = str(p_selected.get("ID", cat_sel)).replace(" ", "_")
-                    max_cant = int(p_selected["Stock_Actual"]) if es_salida else 500
+                    max_cant = int(p_selected.get(stock_col if stock_col else "Stock_Actual", 0) or 0) if es_salida else 500
                     col_c1, col_c2 = st.columns([1, 2])
                     with col_c1:
                         cant = st.number_input("Cantidad:", min_value=1, max_value=max(1, max_cant), value=1, step=1)
@@ -402,11 +445,11 @@ def render_remito_view():
                             st.error(f"Los siguientes números de {cat_sel} ya existen: {', '.join(existentes)}. Verifique el marcado físico antes de continuar.")
                             st.stop()
                         st.session_state["cart_items"].append({
-                            "ID_Producto": p_selected["ID"],
-                            "Categoria": p_selected["Categoria"],
-                            "Marca": p_selected["Marca"],
-                            "Descripcion": p_selected["Modelo_Detalle"],
-                            "Codigo_Pieza": p_selected.get("Codigo_Pieza", "-"),
+                            "ID_Producto": p_selected.get(id_col if id_col else "ID", ""),
+                            "Categoria": p_selected.get(cat_col if cat_col else "Categoria", cat_sel),
+                            "Marca": p_selected.get(marca_col if marca_col else "Marca", ""),
+                            "Descripcion": p_selected.get(modelo_col if modelo_col else "Modelo_Detalle", ""),
+                            "Codigo_Pieza": p_selected.get(codigo_col if codigo_col else "Codigo_Pieza", "-"),
                             "Cantidad": int(cant),
                             "Nro_Serie_Bateria_Neumatico": seriales_str if seriales_str else "-"
                         })
@@ -414,7 +457,7 @@ def render_remito_view():
                         st.session_state.pop(f"seriales_{cat_sel}_{item_key}", None)
                         for idx_c in range(5):
                             st.session_state.pop(f"in_num_{cat_sel}_{item_key}_{idx_c}", None)
-                        st.toast(f"Agregado: {p_selected['Modelo_Detalle']} (x{cant})")
+                        st.toast(f"Agregado: {p_selected.get(modelo_col if modelo_col else 'Modelo_Detalle', '')} (x{cant})")
                         st.rerun()
 
         else:

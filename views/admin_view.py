@@ -198,7 +198,7 @@ def render_admin_view():
             veh_id = getattr(db.spreadsheet_vehiculos, "id", "desconocido")
             st.success(f"🟢 Conectado a Google Sheets. Inventario: {inv_id} | Flota (solo lectura): {veh_id}")
         else:
-            st.warning("🟡 Funcionando en modo de almacenamiento local seguro. Para conectar directamente con tu Google Sheets en la nube, configura las credenciales en secrets.toml.")
+            st.warning("🟡 Google Sheets no está conectado en esta app. La app puede seguir funcionando con Supabase, pero los libros de Google quedan deshabilitados. Revisa secrets.toml / Secrets de Streamlit Cloud y la sección [gcp_service_account].")
 
         email_cfg = {}
         if hasattr(st, "secrets") and "email" in st.secrets:

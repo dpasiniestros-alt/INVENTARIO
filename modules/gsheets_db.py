@@ -18,12 +18,50 @@ DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 os.makedirs(DATA_DIR, exist_ok=True)
 
 def safe_secret(key, default=""):
+    keys_to_try = [key, key.upper(), key.lower()]
     try:
-        if hasattr(st, "secrets") and key in st.secrets:
-            return st.secrets[key]
+        if hasattr(st, "secrets") and st.secrets:
+            for candidate in keys_to_try:
+                if candidate in st.secrets:
+                    return st.secrets[candidate]
+            if hasattr(st.secrets, "get"):
+                nested = st.secrets.get("gcp_service_account")
+                if isinstance(nested, dict) and key in nested:
+                    return nested[key]
     except Exception:
         pass
+    for candidate in keys_to_try:
+        value = os.environ.get(candidate)
+        if value not in (None, ""):
+            return value
     return default
+
+
+def _load_gcp_service_account():
+    try:
+        if hasattr(st, "secrets") and st.secrets:
+            nested = st.secrets.get("gcp_service_account") if hasattr(st.secrets, "get") else None
+            if isinstance(nested, dict) and nested:
+                return dict(nested)
+            if "gcp_service_account" in st.secrets:
+                value = st.secrets["gcp_service_account"]
+                if isinstance(value, dict):
+                    return dict(value)
+                if isinstance(value, str):
+                    return json.loads(value)
+        env_value = os.environ.get("GCP_SERVICE_ACCOUNT") or os.environ.get("GOOGLE_SERVICE_ACCOUNT")
+        if env_value:
+            try:
+                return json.loads(env_value)
+            except Exception:
+                return None
+        creds_path = os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
+        if creds_path and os.path.exists(creds_path):
+            with open(creds_path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+    except Exception:
+        pass
+    return None
 
 class DatabaseManager:
     def __init__(self):
@@ -86,45 +124,51 @@ class DatabaseManager:
 
     def _init_connection(self):
         try:
-            if hasattr(st, "secrets") and "gcp_service_account" in st.secrets:
-                import gspread
-                from google.oauth2.service_account import Credentials
+            creds_dict = _load_gcp_service_account()
+            if not creds_dict:
+                self.is_connected_gsheets = False
+                print("Google Sheets: no hay credenciales GCP/Service Account cargadas (Secrets / env).")
+                return
 
-                scopes = [
-                    "https://www.googleapis.com/auth/spreadsheets",
-                    "https://www.googleapis.com/auth/drive"
-                ]
-                creds_dict = dict(st.secrets["gcp_service_account"])
-                creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
-                self.client = gspread.authorize(creds)
-                
-                veh_id = safe_secret("GSHEET_VEHICULOS_ID", "1ZLxa6UaMNJ8irgTUNqPhLr2qENyMLwXnJY8B-y0UlVU")
-                if veh_id:
-                    try:
-                        self.spreadsheet_vehiculos = self.client.open_by_key(veh_id)
-                    except Exception as exc:
-                        log_exception("gsheets", f"No se pudo abrir la hoja {sheet_name}", exc)
-                        pass
+            import gspread
+            from google.oauth2.service_account import Credentials
 
-                inv_id = safe_secret("GSHEET_INVENTARIO_ID", "1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg")
-                if inv_id:
-                    try:
-                        self.spreadsheet_inventario = self.client.open_by_key(inv_id)
-                    except Exception as exc:
-                        log_exception("gsheets", f"No se pudo abrir la hoja de órdenes {sname}", exc)
-                        pass
+            scopes = [
+                "https://www.googleapis.com/auth/spreadsheets",
+                "https://www.googleapis.com/auth/drive"
+            ]
+            creds = Credentials.from_service_account_info(creds_dict, scopes=scopes)
+            self.client = gspread.authorize(creds)
 
-                ord_id = safe_secret("GSHEET_ORDENES_ID", "1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY")
-                if ord_id:
-                    try:
-                        self.spreadsheet_ordenes = self.client.open_by_key(ord_id)
-                    except Exception:
-                        pass
+            veh_id = safe_secret("GSHEET_VEHICULOS_ID", "1ZLxa6UaMNJ8irgTUNqPhLr2qENyMLwXnJY8B-y0UlVU")
+            if veh_id:
+                try:
+                    self.spreadsheet_vehiculos = self.client.open_by_key(veh_id)
+                except Exception as exc:
+                    log_exception("gsheets", "No se pudo abrir la hoja VEHICULOS", exc)
 
-                if self.spreadsheet_vehiculos or self.spreadsheet_inventario or self.spreadsheet_ordenes:
-                    self.is_connected_gsheets = True
-        except Exception:
+            inv_id = safe_secret("GSHEET_INVENTARIO_ID", "1oWdR8mEhS2oe7XyhGMI_SAEQOmPPd46Z2Rf5lyexCxg")
+            if inv_id:
+                try:
+                    self.spreadsheet_inventario = self.client.open_by_key(inv_id)
+                except Exception as exc:
+                    log_exception("gsheets", "No se pudo abrir la hoja de inventario", exc)
+
+            ord_id = safe_secret("GSHEET_ORDENES_ID", "1yR1k8wufRB108ZEekYaXkT8Q3GlfRKfMej3HDbWRjLY")
+            if ord_id:
+                try:
+                    self.spreadsheet_ordenes = self.client.open_by_key(ord_id)
+                except Exception as exc:
+                    log_exception("gsheets", "No se pudo abrir la hoja de órdenes", exc)
+
+            if self.spreadsheet_vehiculos or self.spreadsheet_inventario or self.spreadsheet_ordenes:
+                self.is_connected_gsheets = True
+            else:
+                self.is_connected_gsheets = False
+                print("Google Sheets: no se pudo abrir ningún libro con los IDs configurados.")
+        except Exception as exc:
             self.is_connected_gsheets = False
+            log_exception("gsheets", "Error inicializando conexión con Google Sheets", exc)
 
     def _init_local_backup(self):
         return
