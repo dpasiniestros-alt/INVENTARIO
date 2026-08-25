@@ -1120,6 +1120,16 @@ def get_db():
             def get_ordenes_taller(self, *a, **kw):
                 return pd.DataFrame()
 
+            def get_email_config(self):
+                return {
+                    "subject": "Comprobante Digital: Remito de {tipo_remito} N° {nro_remito}",
+                    "body": "Estimado/a {destinatario_nombre},\n\nAdjunto encontrará el comprobante del movimiento de taller {nro_remito}.\n\nTipo de movimiento: {tipo_remito}",
+                }
+
+            def save_email_config(self, config: dict, usuario: str = "") -> bool:
+                self.last_error = "Imposible guardar la plantilla de email: Supabase no está configurado."
+                return False
+
             def get_remitos(self):
                 return pd.DataFrame()
 
