@@ -17,6 +17,32 @@ from modules.supabase_client import get_supabase_client, refresh_supabase_client
 APP_TIMEZONE = ZoneInfo("America/Argentina/Buenos_Aires")
 
 
+def _is_transient_supabase_error(error_text: str) -> bool:
+    text = error_text.lower()
+    transient_terms = (
+        "timeout", "timed out", "connection", "connect", "reset", "temporarily", "503", "502", "504",
+        "jwt issued at future", "issued at future", "pgrst303", "unauthorized", "401", "future"
+    )
+    return any(term in text for term in transient_terms)
+
+
+def _get_drive_folder_id(default: str = "") -> str:
+    """Resuelve la carpeta de destino de PDFs y evidencia desde Secrets."""
+    try:
+        if hasattr(st, "secrets"):
+            for key in ("DRIVE_PDF_FOLDER_ID", "PDF_DRIVE_FOLDER_ID", "DRIVE_FOLDER_ID"):
+                if key in st.secrets and str(st.secrets[key]).strip():
+                    return str(st.secrets[key]).strip()
+            if "drive" in st.secrets and isinstance(st.secrets["drive"], dict):
+                for key in ("PDF_FOLDER_ID", "FOLDER_ID"):
+                    val = st.secrets["drive"].get(key)
+                    if val and str(val).strip():
+                        return str(val).strip()
+    except Exception:
+        pass
+    return default.strip()
+
+
 def now_local() -> datetime.datetime:
     return datetime.datetime.now(APP_TIMEZONE)
 
@@ -38,9 +64,7 @@ class DatabaseManagerSupabase:
             self.last_error = str(exc)
             log_exception("supabase", "Error ejecutando operación", exc)
             error_text = str(exc).lower()
-            transient = any(term in error_text for term in (
-                "timeout", "timed out", "connection", "connect", "reset", "temporarily", "503", "502", "504"
-            ))
+            transient = _is_transient_supabase_error(error_text)
             if transient:
                 try:
                     self.client = refresh_supabase_client()
@@ -826,22 +850,24 @@ class DatabaseManagerSupabase:
 
     def subir_archivo_a_drive(self, archivo_bytes, nombre_archivo: str, carpeta_id: str = None) -> str:
         """Sube evidencias a Google Drive sin escribir datos en Google Sheets."""
-        try:
+        carpeta_destino = carpeta_id or _get_drive_folder_id()
+
+        def upload():
             from io import BytesIO
             from google.oauth2.service_account import Credentials
             from googleapiclient.discovery import build
             from googleapiclient.http import MediaIoBaseUpload
 
             if "gcp_service_account" not in st.secrets:
-                return ""
+                raise RuntimeError("Falta la sección gcp_service_account en Secrets")
             creds = Credentials.from_service_account_info(
                 dict(st.secrets["gcp_service_account"]),
                 scopes=["https://www.googleapis.com/auth/drive"],
             )
             drive_service = build("drive", "v3", credentials=creds)
             metadata = {"name": nombre_archivo}
-            if carpeta_id:
-                metadata["parents"] = [carpeta_id]
+            if carpeta_destino:
+                metadata["parents"] = [carpeta_destino]
             media = MediaIoBaseUpload(BytesIO(archivo_bytes), mimetype="application/octet-stream", resumable=True)
             archivo = drive_service.files().create(
                 body=metadata, media_body=media, fields="id"
@@ -853,9 +879,18 @@ class DatabaseManagerSupabase:
             except Exception:
                 pass
             return f"https://drive.google.com/file/d/{archivo['id']}/view"
+
+        try:
+            return upload()
         except Exception as exc:
-            print(f"Error subiendo archivo a Drive: {exc}")
-            return ""
+            log_exception("drive", f"Error subiendo {nombre_archivo} a Drive", exc)
+            self.last_error = f"Drive: {exc}"
+            try:
+                return upload()
+            except Exception as retry_exc:
+                log_exception("drive", f"Error en segundo intento subiendo {nombre_archivo}", retry_exc)
+                self.last_error = f"Drive tras reintento: {retry_exc}"
+                return ""
 
     def descargar_archivo_de_drive(self, enlace: str) -> bytes:
         """Descarga el archivo original guardado en Drive."""

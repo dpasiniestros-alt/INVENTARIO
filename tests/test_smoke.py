@@ -3,6 +3,7 @@ import unittest
 import pandas as pd
 
 from modules.gsheets_db import DatabaseManager
+from modules.supabase_db import _is_transient_supabase_error
 
 
 class FailingSheets:
