@@ -198,7 +198,7 @@ def render_admin_view():
             veh_id = getattr(db.spreadsheet_vehiculos, "id", "desconocido")
             st.success(f"🟢 Conectado a Google Sheets. Inventario: {inv_id} | Flota (solo lectura): {veh_id}")
         else:
-            st.warning("🟡 Google Sheets no está conectado en esta app. La app puede seguir funcionando con Supabase, pero los libros de Google quedan deshabilitados. Revisa secrets.toml / Secrets de Streamlit Cloud y la sección [gcp_service_account].")
+            st.warning("🟡 Funcionando en modo de almacenamiento local seguro. Para conectar directamente con tu Google Sheets en la nube, configura las credenciales en secrets.toml.")
 
         email_cfg = {}
         if hasattr(st, "secrets") and "email" in st.secrets:
@@ -209,6 +209,26 @@ def render_admin_view():
         else:
             st.info("⚪ Para habilitar el envío automático de PDFs por correo, configura la sección [email] en secrets.toml.")
 
+        # Agregar comprobación manual y diagnóstico de conexión
+        from modules.supabase_client import check_supabase_connection, supabase_configured
+        st.markdown("#### 🔎 Comprobación de Conexiones en la Nube")
+        if st.button("Probar Conexión Supabase y Mostrar Secrets (enmascarados)", use_container_width=True):
+            ok, msg = check_supabase_connection()
+            if ok:
+                st.success(f"Conexión Supabase: ✅ {msg}")
+            else:
+                st.error(f"Conexión Supabase: ❌ {msg}")
+
+            # Mostrar claves presentes en st.secrets (enmascaradas)
+            if hasattr(st, 'secrets'):
+                secrets_present = {k: ('***' + str(v)[-4:] if v and isinstance(v, str) else 'SET') for k, v in dict(st.secrets).items()}
+                st.write("Secrets cargados (clave: valor enmascarado):")
+                st.json(secrets_present)
+
+            if not supabase_configured():
+                st.info("Supabase no está completamente configurado. Sigue la guía en SUPABASE_SETUP.md y agrega las claves en Streamlit Secrets.")
+
+        st.markdown("---")
         st.markdown("### ✉️ Plantilla del mensaje de email")
         email_template = db.get_email_config()
         with st.form("form_email_template"):
