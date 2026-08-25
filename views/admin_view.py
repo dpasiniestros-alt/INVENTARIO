@@ -247,6 +247,26 @@ def render_admin_view():
                     st.success("Plantilla de email actualizada.")
                     st.rerun()
 
+        st.markdown("### 📁 Carpeta de Google Drive para PDFs")
+        drive_cfg = db.get_drive_config()
+        with st.form("form_drive_config"):
+            drive_folder_url = st.text_input(
+                "Link de la carpeta o ID de Drive:",
+                value=drive_cfg.get("folder_url") or drive_cfg.get("folder_id") or "",
+                help="Ejemplo: https://drive.google.com/drive/folders/147MjVuvZ1wIYv-oVjjLpoSTPlKUWvPKx",
+            )
+            drive_folder_name = st.text_input(
+                "Nombre visible de la carpeta:",
+                value=drive_cfg.get("folder_name", "MI UNIDAD / INVENTARIO"),
+            )
+            if st.form_submit_button("Guardar carpeta Drive", use_container_width=True):
+                if db.save_drive_config(
+                    {"folder_id": drive_folder_url, "folder_url": drive_folder_url, "folder_name": drive_folder_name},
+                    str(st.session_state.get("current_user", "")),
+                ):
+                    st.success("Configuración de Drive actualizada.")
+                    st.rerun()
+
         with st.expander("📖 Ver Guía Rápida de Configuración de Secrets"):
             st.code("""
 # En Streamlit Cloud > Settings > Secrets:

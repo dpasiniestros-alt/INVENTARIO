@@ -13,6 +13,8 @@ def render_ordenes_view():
     st.caption("Consulta de órdenes de trabajo generadas por el sistema central (Hoja 'COORDINACION DE ENVIO A TALLER')")
 
     df_ots = db.get_ordenes_taller()
+    if "Nro_OT" not in df_ots.columns:
+        df_ots["Nro_OT"] = ""
 
     if df_ots.empty:
         st.info("No hay órdenes de taller registradas o sincronizadas en este momento.")

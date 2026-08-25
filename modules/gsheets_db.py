@@ -496,9 +496,26 @@ class DatabaseManager:
                                 padded = list(values_row) + [""] * max(0, len(headers) - len(values_row))
                                 rows.append(padded[:len(headers)])
                             df = pd.DataFrame(rows, columns=headers)
-                            # El número de OT está definido por la columna Q del libro.
-                            if len(df.columns) >= 17:
-                                df["Nro_OT"] = df.iloc[:, 16].astype(str)
+
+                            # En el libro real, la OT no corresponde a '#ID' (numérico) sino a la
+                            # columna "ORDEN DE TRABAJO #". Esa columna puede ir con encabezados
+                            # duplicados y valores vacíos; hay que preferir la columna explícita.
+                            ot_candidates = []
+                            for c in df.columns:
+                                cl = str(c).strip().upper()
+                                if "ORDEN DE TRABAJO" in cl or "ORDEN" in cl and "TRABAJO" in cl or ("OT" in cl and "NRO" in cl):
+                                    ot_candidates.append(c)
+                            if not ot_candidates:
+                                for cand in ["#ID", "NRO_OT", "OT", "NRO OT", "ORDEN DE TRABAJO #"]:
+                                    if cand in df.columns:
+                                        ot_candidates.append(cand)
+                            if not ot_candidates and len(df.columns) >= 17:
+                                ot_candidates = [df.columns[16]]
+                            if ot_candidates:
+                                candidate = ot_candidates[0]
+                                df["Nro_OT"] = df[candidate].astype(str).str.strip()
+                            else:
+                                df["Nro_OT"] = ""
                             break
                     except Exception:
                         pass
@@ -511,7 +528,7 @@ class DatabaseManager:
         cols_norm = {}
         for c in df.columns:
             cl = str(c).strip().upper()
-            if "ORDEN" in cl or "OT" in cl or "NRO" in cl:
+            if cl == "NRO_OT" or "ORDEN" in cl and "TRABAJO" in cl or "OT" in cl and "NRO" in cl:
                 cols_norm[c] = "Nro_OT"
             elif "FALLA" in cl or "REPORTE" in cl or "TRABAJO" in cl or "DESCRIPCION" in cl:
                 cols_norm[c] = "Descripcion_Trabajo"
@@ -521,15 +538,22 @@ class DatabaseManager:
                 cols_norm[c] = "Estado"
             elif "GERENCIA" in cl:
                 cols_norm[c] = "Gerencia"
+            elif "FECHA" in cl and "ENTREGA" in cl:
+                cols_norm[c] = "Fecha"
 
         if cols_norm:
             df.rename(columns=cols_norm, inplace=True)
 
         # La hoja de OT tiene columnas duplicadas y el archivo original ya trae una
-        # columna Nro_OT extra. Debemos conservar solo la primera para que pandas no
+        # columna extra de número. Debemos conservar solo la primera para que pandas no
         # devuelva un DataFrame cuando se accede a df["Nro_OT"].
         if not df.empty:
             df = df.loc[:, ~df.columns.duplicated(keep="first")]
+
+        if "Nro_OT" not in df.columns:
+            df["Nro_OT"] = ""
+        df["Nro_OT"] = df["Nro_OT"].astype(str).str.replace("\xa0", " ").str.strip()
+        df = df[~df["Nro_OT"].str.upper().isin(["", "#REF!", "NAN", "NONE", "NULL"])].copy()
 
         for req in ["Nro_OT", "Descripcion_Trabajo", "Patente", "Estado", "Gerencia", "Fecha"]:
             if req not in df.columns:

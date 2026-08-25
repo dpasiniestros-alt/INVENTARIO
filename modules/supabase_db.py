@@ -26,21 +26,45 @@ def _is_transient_supabase_error(error_text: str) -> bool:
     return any(term in text for term in transient_terms)
 
 
+def _normalize_private_key(private_key: str) -> str:
+    """Normaliza claves de servicio copiadas desde JSON o desde Secrets de Streamlit."""
+    if not private_key:
+        return ""
+    cleaned = str(private_key).strip().replace('\\n', '\n')
+    if "-----BEGIN PRIVATE KEY-----" in cleaned and "-----END PRIVATE KEY-----" in cleaned:
+        return cleaned
+    return cleaned
+
+
+def _extract_drive_id(value: str) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if "/d/" in text:
+        match = text.split("/d/")[1].split("/", 1)[0]
+        return match.strip()
+    if "id=" in text:
+        match = text.split("id=")[1].split("&", 1)[0]
+        return match.strip()
+    return text
+
+
 def _get_drive_folder_id(default: str = "") -> str:
-    """Resuelve la carpeta de destino de PDFs y evidencia desde Secrets."""
+    """Resuelve la carpeta de destino de PDFs y evidencia desde Secrets o configuración."""
     try:
         if hasattr(st, "secrets"):
             for key in ("DRIVE_PDF_FOLDER_ID", "PDF_DRIVE_FOLDER_ID", "DRIVE_FOLDER_ID"):
-                if key in st.secrets and str(st.secrets[key]).strip():
-                    return str(st.secrets[key]).strip()
+                val = st.secrets.get(key) if isinstance(st.secrets, dict) else None
+                if val and str(val).strip():
+                    return _extract_drive_id(str(val))
             if "drive" in st.secrets and isinstance(st.secrets["drive"], dict):
                 for key in ("PDF_FOLDER_ID", "FOLDER_ID"):
                     val = st.secrets["drive"].get(key)
                     if val and str(val).strip():
-                        return str(val).strip()
+                        return _extract_drive_id(str(val))
     except Exception:
         pass
-    return default.strip()
+    return _extract_drive_id(default)
 
 
 def now_local() -> datetime.datetime:
@@ -110,6 +134,31 @@ class DatabaseManagerSupabase:
                 defaults.update(response.data[0].get("valor") or {})
             return defaults
         return self._safe_execute(fetch, defaults)
+
+    def get_drive_config(self) -> dict:
+        defaults = {
+            "folder_id": _get_drive_folder_id(),
+            "folder_name": "MI UNIDAD / INVENTARIO",
+            "folder_url": "",
+        }
+        def fetch():
+            response = self.client.table("configuracion_app").select("valor").eq("clave", "drive_config").limit(1).execute()
+            if response.data:
+                defaults.update(response.data[0].get("valor") or {})
+            return defaults
+        return self._safe_execute(fetch, defaults)
+
+    def save_drive_config(self, config: dict, usuario: str = "") -> bool:
+        def save():
+            payload = dict(config or {})
+            if payload.get("folder_id"):
+                payload["folder_id"] = _extract_drive_id(payload["folder_id"])
+            if payload.get("folder_url"):
+                payload["folder_id"] = _extract_drive_id(payload["folder_url"]) or payload.get("folder_id", "")
+            self.client.table("configuracion_app").upsert({"clave": "drive_config", "valor": payload}).execute()
+            self.registrar_auditoria(usuario, "MODIFICAR_CONFIG_DRIVE", "configuracion", "drive_config", payload)
+            return True
+        return self._safe_execute(save, False)
 
     def get_administradores(self) -> pd.DataFrame:
         """Obtiene los responsables habilitados para entrar a administración."""
@@ -875,8 +924,13 @@ class DatabaseManagerSupabase:
             from googleapiclient.http import MediaIoBaseUpload
 
             if "gcp_service_account" in st.secrets:
+                sa_info = dict(st.secrets["gcp_service_account"])
+                private_key = str(sa_info.get("private_key") or "")
+                if not private_key or "BEGIN PRIVATE KEY" not in private_key:
+                    raise ValueError("private_key inválida o vacía")
+                sa_info["private_key"] = _normalize_private_key(private_key)
                 creds = Credentials.from_service_account_info(
-                    dict(st.secrets["gcp_service_account"]),
+                    sa_info,
                     scopes=["https://www.googleapis.com/auth/drive"],
                 )
                 drive_service = build("drive", "v3", credentials=creds)
