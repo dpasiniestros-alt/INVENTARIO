@@ -5,6 +5,7 @@ Vista de Historial de Remitos, Descargas y Reenvio de Emails.
 
 import os
 import tempfile
+import urllib.request
 import streamlit as st
 import pandas as pd
 from modules.gsheets_db import get_db
@@ -110,7 +111,15 @@ def render_historial_view():
             
             pdf_link = str(rem.get("Link_PDF", "") or "")
             pdf_path = pdf_link if os.path.exists(pdf_link) else ""
-            pdf_bytes = db.descargar_archivo_de_drive(pdf_link) if pdf_link.startswith("https://drive.google.com/") else b""
+            pdf_bytes = b""
+            if pdf_link.startswith("https://drive.google.com/"):
+                pdf_bytes = db.descargar_archivo_de_drive(pdf_link)
+            elif pdf_link.startswith("http"):
+                try:
+                    with urllib.request.urlopen(pdf_link, timeout=30) as response:
+                        pdf_bytes = response.read()
+                except Exception:
+                    pdf_bytes = b""
             if not pdf_bytes and not pdf_path:
                 st.warning("El PDF original de este remito no está disponible en el almacenamiento permanente.")
 
