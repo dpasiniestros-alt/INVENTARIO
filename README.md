@@ -94,3 +94,4 @@ copy_to_taller = \"taller.empresa@gmail.com\"
 `
 
 > **Nota**: Para conectar con Google Sheets, solo debes compartir tu planilla de Google Sheets con el correo client_email de tu cuenta de servicio de Google Cloud dándole permiso de **Editor**.
+# INVENTARIO
