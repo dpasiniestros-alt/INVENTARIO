@@ -849,48 +849,96 @@ class DatabaseManagerSupabase:
         return self._safe_execute(update, False)
 
     def subir_archivo_a_drive(self, archivo_bytes, nombre_archivo: str, carpeta_id: str = None) -> str:
-        """Sube evidencias a Google Drive sin escribir datos en Google Sheets."""
+        """Sube evidencias a Google Drive o, como fallback, a Supabase Storage.
+
+        Primero intenta usar la cuenta de servicio GCP (Drive). Si no está
+        configurada o falla, intenta subir el archivo a Supabase Storage en el
+        bucket `remitos` y devuelve una URL pública o firmada.
+        """
         carpeta_destino = carpeta_id or _get_drive_folder_id()
 
-        def upload():
+        # Intento 1: Google Drive cuando hay credenciales
+        try:
             from io import BytesIO
             from google.oauth2.service_account import Credentials
             from googleapiclient.discovery import build
             from googleapiclient.http import MediaIoBaseUpload
 
-            if "gcp_service_account" not in st.secrets:
-                raise RuntimeError("Falta la sección gcp_service_account en Secrets")
-            creds = Credentials.from_service_account_info(
-                dict(st.secrets["gcp_service_account"]),
-                scopes=["https://www.googleapis.com/auth/drive"],
-            )
-            drive_service = build("drive", "v3", credentials=creds)
-            metadata = {"name": nombre_archivo}
-            if carpeta_destino:
-                metadata["parents"] = [carpeta_destino]
-            media = MediaIoBaseUpload(BytesIO(archivo_bytes), mimetype="application/octet-stream", resumable=True)
-            archivo = drive_service.files().create(
-                body=metadata, media_body=media, fields="id"
-            ).execute()
-            try:
-                drive_service.permissions().create(
-                    fileId=archivo["id"], body={"type": "anyone", "role": "reader"}
+            if "gcp_service_account" in st.secrets:
+                creds = Credentials.from_service_account_info(
+                    dict(st.secrets["gcp_service_account"]),
+                    scopes=["https://www.googleapis.com/auth/drive"],
+                )
+                drive_service = build("drive", "v3", credentials=creds)
+                metadata = {"name": nombre_archivo}
+                if carpeta_destino:
+                    metadata["parents"] = [carpeta_destino]
+                media = MediaIoBaseUpload(BytesIO(archivo_bytes), mimetype="application/octet-stream", resumable=True)
+                archivo = drive_service.files().create(
+                    body=metadata, media_body=media, fields="id"
                 ).execute()
-            except Exception:
-                pass
-            return f"https://drive.google.com/file/d/{archivo['id']}/view"
-
-        try:
-            return upload()
+                try:
+                    drive_service.permissions().create(
+                        fileId=archivo["id"], body={"type": "anyone", "role": "reader"}
+                    ).execute()
+                except Exception:
+                    pass
+                return f"https://drive.google.com/file/d/{archivo['id']}/view"
         except Exception as exc:
             log_exception("drive", f"Error subiendo {nombre_archivo} a Drive", exc)
             self.last_error = f"Drive: {exc}"
-            try:
-                return upload()
-            except Exception as retry_exc:
-                log_exception("drive", f"Error en segundo intento subiendo {nombre_archivo}", retry_exc)
-                self.last_error = f"Drive tras reintento: {retry_exc}"
+
+        # Fallback: Supabase Storage
+        try:
+            if not self.client:
+                self.last_error = "Supabase client no disponible para almacenar archivo."
                 return ""
+
+            bucket = "remitos"
+            try:
+                # Intentar crear el bucket si no existe (no falla si ya existe)
+                self.client.storage.create_bucket(bucket)
+            except Exception:
+                # puede fallar si ya existe o si no hay permisos; ignorar
+                pass
+
+            from io import BytesIO
+            file_path = nombre_archivo
+            buf = BytesIO(archivo_bytes)
+            buf.seek(0)
+
+            # sube el archivo al bucket
+            try:
+                self.client.storage.from_(bucket).upload(file_path, buf)
+            except Exception:
+                # algunos adaptadores requieren bytes directamente
+                try:
+                    self.client.storage.from_(bucket).upload(file_path, archivo_bytes)
+                except Exception as exc2:
+                    self.last_error = f"Supabase Storage upload error: {exc2}"
+                    return ""
+
+            # intentar obtener URL pública
+            try:
+                public_url = self.client.storage.from_(bucket).get_public_url(file_path)
+                if public_url:
+                    return public_url
+            except Exception:
+                pass
+
+            # si get_public_url no está disponible, intentar signed URL
+            try:
+                signed = self.client.storage.create_signed_url(bucket, file_path, 60 * 60 * 24 * 7)
+                url = signed.get("signedURL") if isinstance(signed, dict) else signed
+                return url
+            except Exception as exc3:
+                self.last_error = f"No se pudo obtener URL del archivo en Supabase: {exc3}"
+                return ""
+
+        except Exception as exc:
+            log_exception("supabase_storage", f"Error subiendo {nombre_archivo} a Supabase Storage", exc)
+            self.last_error = f"Supabase Storage: {exc}"
+            return ""
 
     def descargar_archivo_de_drive(self, enlace: str) -> bytes:
         """Descarga el archivo original guardado en Drive."""
