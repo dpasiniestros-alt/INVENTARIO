@@ -67,6 +67,21 @@ def _get_drive_folder_id(default: str = "") -> str:
     return _extract_drive_id(default)
 
 
+def _google_drive_credentials_available() -> bool:
+    """Se usa para no disparar Drive si el proyecto no está realmente configurado."""
+    try:
+        if not hasattr(st, "secrets") or "gcp_service_account" not in st.secrets:
+            return False
+        sa_info = dict(st.secrets["gcp_service_account"])
+        private_key = str(sa_info.get("private_key") or "")
+        client_email = str(sa_info.get("client_email") or "")
+        if not private_key or "BEGIN PRIVATE KEY" not in private_key or not client_email:
+            return False
+        return True
+    except Exception:
+        return False
+
+
 def now_local() -> datetime.datetime:
     return datetime.datetime.now(APP_TIMEZONE)
 
@@ -916,14 +931,14 @@ class DatabaseManagerSupabase:
         """
         carpeta_destino = carpeta_id or _get_drive_folder_id()
 
-        # Intento 1: Google Drive cuando hay credenciales
+        # Intento 1: Drive solo cuando las credenciales reales están presentes y válidas.
         try:
             from io import BytesIO
             from google.oauth2.service_account import Credentials
             from googleapiclient.discovery import build
             from googleapiclient.http import MediaIoBaseUpload
 
-            if "gcp_service_account" in st.secrets:
+            if _google_drive_credentials_available():
                 sa_info = dict(st.secrets["gcp_service_account"])
                 private_key = str(sa_info.get("private_key") or "")
                 if not private_key or "BEGIN PRIVATE KEY" not in private_key:
