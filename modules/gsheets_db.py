@@ -1088,6 +1088,15 @@ def get_db():
                 except Exception:
                     return pd.DataFrame(columns=["nombre", "pin"]) 
 
+            def es_administrador(self, nombre: str) -> bool:
+                if not nombre:
+                    return False
+                responsables = self.get_responsables()
+                if responsables.empty:
+                    return False
+                nombres = [str(item).strip() for item in responsables.get("nombre", pd.Series(dtype=str)).tolist()]
+                return nombre.strip() in nombres
+
             def get_unidades_seriales(self):
                 return []
 
