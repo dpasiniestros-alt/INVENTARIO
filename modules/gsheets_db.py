@@ -1088,6 +1088,17 @@ def get_db():
                 except Exception:
                     return pd.DataFrame(columns=["nombre", "pin"]) 
 
+            def get_administradores(self):
+                return pd.DataFrame(columns=["nombre"])
+
+            def agregar_administrador(self, nombre: str, usuario: str = "") -> bool:
+                self.last_error = "Supabase no está configurado; no se puede habilitar un administrador."
+                return False
+
+            def quitar_administrador(self, nombre: str, usuario: str = "") -> bool:
+                self.last_error = "Supabase no está configurado; no se puede quitar un administrador."
+                return False
+
             def es_administrador(self, nombre: str) -> bool:
                 if not nombre:
                     return False

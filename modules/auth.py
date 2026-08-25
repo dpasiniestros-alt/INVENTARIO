@@ -18,7 +18,10 @@ def check_admin_auth() -> bool:
     usuario = str(st.session_state.get("current_user", "")).strip()
     if not st.session_state.get("user_authenticated", False) or not usuario:
         return False
-    return get_db().es_administrador(usuario)
+    db = get_db()
+    if not hasattr(db, "es_administrador"):
+        return False
+    return db.es_administrador(usuario)
 
 def render_admin_login() -> bool:
     st.markdown("### 🔒 Acceso al Panel de Control")
